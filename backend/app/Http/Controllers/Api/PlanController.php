@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Plan;
+use App\Services\Servers\ProtocolRegistry;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class PlanController extends Controller
 {
@@ -32,7 +34,7 @@ class PlanController extends Controller
 
     public function destroy(Plan $plan)
     {
-        if ($plan->subscriptions()->exists()) {
+        if ($plan->subscriptions()->exists() || $plan->orders()->exists()) {
             return response()->json(['message' => 'Plans with subscription history cannot be deleted. Mark the plan inactive instead.'], 409);
         }
         $plan->delete();
@@ -49,7 +51,7 @@ class PlanController extends Controller
             'currency' => [$updating ? 'sometimes' : 'required', 'string', 'size:3'],
             'duration_days' => [$updating ? 'sometimes' : 'required', 'integer', 'between:1,3660'],
             'allowed_protocols' => [$updating ? 'sometimes' : 'required', 'array', 'min:1'],
-            'allowed_protocols.*' => ['string'], 'allowed_server_ids' => ['nullable', 'array'],
+            'allowed_protocols.*' => [Rule::in(array_keys(ProtocolRegistry::DEFINITIONS))], 'allowed_server_ids' => ['nullable', 'array'],
             'allowed_server_ids.*' => ['integer', 'exists:vpn_servers,id'],
             'connection_limit' => ['integer', 'between:1,100'], 'data_quota_bytes' => ['nullable', 'integer', 'min:0'],
             'bandwidth_mbps' => ['nullable', 'integer', 'min:1'], 'is_active' => ['boolean'],

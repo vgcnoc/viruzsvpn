@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureAdministrator;
+use App\Http\Middleware\EnsureCustomer;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,7 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->alias(['admin' => EnsureAdministrator::class]);
+        $middleware->alias(['admin' => EnsureAdministrator::class, 'customer' => EnsureCustomer::class]);
         $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') ? null : route('login'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {

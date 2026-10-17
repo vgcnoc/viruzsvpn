@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\OperationLog;
 use App\Models\VpnAccount;
+use App\Models\VpnOrder;
 use App\Services\Servers\DriverFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -38,10 +39,17 @@ class ProvisionVpnAccount implements ShouldQueue
         try {
             $result = $drivers->for($account->server)->createAccount($account->server, $account);
             if (($result['supported'] ?? false) && in_array($result['status'] ?? '', ['success', 'demo'], true)) {
+                $order = VpnOrder::where('vpn_account_id', $account->id)->where('type', 'new')->where('status', 'paid')->first();
+                $startedAt = $order ? now() : $account->starts_at;
+                $expiresAt = $order ? $startedAt->copy()->addDays($order->duration_days) : $account->expires_at;
                 $account->update([
                     'status' => 'active', 'remote_reference' => $result['remote_reference'] ?? data_get($result, 'data.remote_reference'),
-                    'encrypted_provisioning_secret' => null,
+                    'encrypted_provisioning_secret' => null, 'starts_at' => $startedAt, 'expires_at' => $expiresAt,
                 ]);
+                if ($order) {
+                    $account->subscriptions()->where('notes', $order->invoice_number)->where('status', 'pending_activation')
+                        ->update(['status' => 'active', 'starts_at' => $startedAt, 'expires_at' => $expiresAt]);
+                }
                 $log->update(['status' => 'success', 'message' => $result['message'] ?? null, 'details' => $result, 'completed_at' => now()]);
 
                 return;

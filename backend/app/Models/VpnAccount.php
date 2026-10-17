@@ -11,7 +11,7 @@ class VpnAccount extends Model
     protected $hidden = ['encrypted_provisioning_secret'];
 
     protected $fillable = [
-        'uuid', 'vpn_server_id', 'plan_id', 'protocol', 'identifier', 'allocated_ip', 'status',
+        'uuid', 'user_id', 'vpn_server_id', 'plan_id', 'protocol', 'identifier', 'allocated_ip', 'status',
         'starts_at', 'expires_at', 'device_limit', 'bandwidth_mbps', 'data_quota_bytes',
         'remote_reference', 'adapter_payload', 'encrypted_provisioning_secret', 'provisioning_error', 'idempotency_key',
     ];
@@ -24,6 +24,11 @@ class VpnAccount extends Model
     public function server(): BelongsTo
     {
         return $this->belongsTo(VpnServer::class, 'vpn_server_id');
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function plan(): BelongsTo

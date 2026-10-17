@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class User extends Authenticatable implements MustVerifyEmailContract
 {
@@ -48,5 +49,15 @@ class User extends Authenticatable implements MustVerifyEmailContract
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function vpnOrders(): HasMany
+    {
+        return $this->hasMany(VpnOrder::class);
+    }
+
+    public function vpnAccounts(): HasMany
+    {
+        return $this->hasMany(VpnAccount::class);
     }
 }

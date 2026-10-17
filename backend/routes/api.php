@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BillingController;
+use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\ServerController;
@@ -21,6 +23,12 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    Route::get('/billing/orders', [BillingController::class, 'adminOrders']);
+    Route::get('/customers', [CustomerController::class, 'index']);
+    Route::get('/billing/settings', [BillingController::class, 'settings']);
+    Route::put('/billing/settings', [BillingController::class, 'updateSettings']);
+    Route::post('/billing/orders/{order}/confirm', [BillingController::class, 'confirm']);
+    Route::post('/billing/orders/{order}/reject', [BillingController::class, 'reject']);
     Route::get('/dashboard', DashboardController::class);
     Route::apiResource('servers', ServerController::class);
     Route::post('/servers/{server}/test', [ServerController::class, 'test']);
@@ -33,4 +41,15 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/accounts/{account}/revoke', [VpnAccountController::class, 'revoke']);
     Route::post('/accounts/{account}/extend', [VpnAccountController::class, 'extend']);
     Route::post('/accounts/{account}/retry', [VpnAccountController::class, 'retry']);
+});
+
+Route::middleware(['auth:sanctum', 'customer'])->prefix('customer')->group(function () {
+    Route::get('/catalog', [BillingController::class, 'catalog']);
+    Route::get('/billing-settings', [BillingController::class, 'settings']);
+    Route::get('/orders', [BillingController::class, 'myOrders']);
+    Route::post('/orders', [BillingController::class, 'createOrder']);
+    Route::post('/orders/{order}/payment', [BillingController::class, 'submitPayment']);
+    Route::post('/orders/{order}/cancel', [BillingController::class, 'cancel']);
+    Route::get('/accounts', [BillingController::class, 'myAccounts']);
+    Route::post('/accounts/{account}/renew', [BillingController::class, 'renew']);
 });

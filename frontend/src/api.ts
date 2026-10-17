@@ -22,14 +22,18 @@ export type Server = {
   status: string; vpn_status: string; is_demo: boolean; tls_verify: boolean; capabilities: { protocols?: string[] }; accounts_count?: number
   last_checked_at?: string; last_latency_ms?: number
 }
-export type Plan = { id: number; name: string; price_cents: number; currency: string; duration_days: number; allowed_protocols: string[]; connection_limit: number; bandwidth_mbps?: number; is_active: boolean }
-export type Account = { id: number; uuid: string; identifier: string; protocol: string; status: string; expires_at?: string; allocated_ip?: string; server: Server; plan?: Plan; device_limit?: number }
+export type Plan = { id: number; name: string; description?: string; price_cents: number; currency: string; duration_days: number; allowed_protocols: string[]; allowed_server_ids?: number[]; connection_limit: number; bandwidth_mbps?: number; data_quota_bytes?: number; is_active: boolean }
+export type Account = { id: number; uuid: string; identifier: string; protocol: string; status: string; expires_at?: string; allocated_ip?: string; server: Server; plan?: Plan; device_limit?: number; user_id?: number; l2tp_psk?: string }
+export type CustomerServer = { id: number; name: string; location?: string; protocols: string[] }
+export type Catalog = { plans: Plan[]; servers: CustomerServer[] }
+export type BillingSettings = { bank_name?: string; account_name?: string; account_number?: string; instructions?: string; payment_enabled: boolean }
+export type VpnOrder = { id: number; invoice_number: string; user_id: number; plan_id: number; vpn_server_id?: number; vpn_account_id?: number; type: 'new' | 'renewal'; protocol?: string; identifier?: string; status: string; amount_cents: number; currency: string; plan_name: string; duration_days: number; payment_reference?: string; payment_note?: string; admin_note?: string; payment_bank_name: string; payment_account_name: string; payment_account_number: string; payment_instructions?: string; payment_due_at: string; paid_at?: string; created_at: string; user?: { id: number; name: string; email: string }; server?: { id: number; name: string }; account?: { id: number; status: string; expires_at?: string; identifier?: string } }
 export type Page<T> = { data: T[]; current_page: number; last_page: number; total: number }
 
 export function apiError(error: unknown) {
   if (axios.isAxiosError(error)) {
     const payload = error.response?.data as { message?: string; errors?: Record<string, string[]> } | undefined
-    return payload?.message ?? (payload?.errors ? Object.values(payload.errors).flat().join(' ') : error.message)
+    return payload?.errors ? Object.values(payload.errors).flat().join(' ') : payload?.message ?? error.message
   }
   return 'An unexpected error occurred.'
 }

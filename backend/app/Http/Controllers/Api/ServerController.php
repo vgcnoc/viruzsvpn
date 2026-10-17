@@ -97,6 +97,7 @@ class ServerController extends Controller
             'credentials.routeros_allowed_cidr' => ['nullable', 'string', 'max:18', 'regex:/^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\/(?:[0-9]|[12][0-9]|3[0-2])$/'],
             'credentials.routeros_certificate' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
             'credentials.routeros_ppp_profile' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
+            'credentials.routeros_l2tp_secret' => ['nullable', 'string', 'min:16', 'max:255'],
         ];
         $data = $request->validate($rules);
         $adapter = $data['adapter'] ?? $server?->adapter;

@@ -1,6 +1,8 @@
-# VPNOPS — VPN management platform
+# virVPN — VPN management and customer billing
 
-VPNOPS is a production-oriented control plane for real VPN infrastructure. It is a fresh project and does not reuse VPNRENT. The React console calls a Laravel API that uses a small driver boundary for every server action; no browser can run an arbitrary server command.
+virVPN is a VPN control plane with customer registration, email verification, plan catalog, manual transfer invoices, administrator payment review, and queue-backed service provisioning. The React console calls a Laravel API with a limited driver boundary for server actions.
+
+The customer sales workflow is documented in [docs/customer-billing.md](docs/customer-billing.md). Payment is verified manually; no payment gateway is connected. Production email verification requires a configured mail transport. Until then, `MAIL_MAILER=log` records verification links only in server logs.
 
 ## What can operate against real infrastructure
 

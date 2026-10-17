@@ -13,6 +13,43 @@ use Throwable;
 /** A deliberately small RouterOS API surface; no generic terminal endpoint. */
 final class MikroTikAdapter extends AbstractAdapter
 {
+    public function sellableProtocols(VpnServer $server): array
+    {
+        try {
+            $client = $this->client($server);
+            $services = [
+                'l2tp-ipsec' => '/interface/l2tp-server/server/print',
+                'sstp' => '/interface/sstp-server/server/print',
+                'openvpn' => '/interface/ovpn-server/server/print',
+                'pptp' => '/interface/pptp-server/server/print',
+            ];
+            $ready = [];
+            foreach ($services as $protocol => $path) {
+                try {
+                    $row = $this->first($client->query(new Query($path))->read());
+                } catch (Throwable) {
+                    continue;
+                }
+                $enabled = in_array(strtolower((string) ($row['enabled'] ?? '')), ['true', 'yes'], true)
+                    || in_array(strtolower((string) ($row['disabled'] ?? '')), ['false', 'no'], true);
+                if (! $row || ! $enabled) {
+                    continue;
+                }
+                if ($protocol === 'l2tp-ipsec' && ($row['use-ipsec'] ?? '') !== 'required') {
+                    continue;
+                }
+                if ($protocol === 'sstp' && (empty($row['certificate']) || $row['certificate'] === 'none')) {
+                    continue;
+                }
+                $ready[] = $protocol;
+            }
+
+            return $ready;
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
     public function testConnection(VpnServer $server): array
     {
         $startedAt = microtime(true);
@@ -79,6 +116,10 @@ final class MikroTikAdapter extends AbstractAdapter
                 return $this->missingProvisioningSecret();
             }
             $client = $this->client($server);
+            $existing = $this->remoteReference($client, $account);
+            if ($existing) {
+                return ['supported' => true, 'status' => 'success', 'message' => 'RouterOS PPP secret already exists.', 'remote_reference' => $existing];
+            }
             $query = (new Query('/ppp/secret/add'))->equal('name', $account->identifier)->equal('password', $password)->equal('service', $service)->equal('disabled', 'no')->equal('comment', $this->comment($account));
             if (! empty($credentials['routeros_ppp_profile'])) {
                 $query->equal('profile', $credentials['routeros_ppp_profile']);

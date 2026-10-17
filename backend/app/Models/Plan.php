@@ -21,4 +21,9 @@ class Plan extends Model
     {
         return $this->hasMany(Subscription::class);
     }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(VpnOrder::class);
+    }
 }
