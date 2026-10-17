@@ -1,6 +1,6 @@
 # Alur pelanggan dan billing virVPN
 
-1. Administrator menguji koneksi server di menu **Servers**. Hanya server RouterOS nyata yang online dan layanan VPN yang terdeteksi aktif dapat ditawarkan ke pelanggan. L2TP/IPsec memerlukan `use-ipsec=required` serta pre-shared key yang disimpan saat edit server. OpenVPN yang belum tersedia pada RouterOS tidak ditawarkan.
+1. Administrator menguji koneksi server di menu **Servers**. Hanya server RouterOS nyata yang online dan layanan SSTP/L2TP-IPsec yang terdeteksi aktif dapat ditawarkan ke pelanggan. L2TP/IPsec memerlukan `use-ipsec=required` serta pre-shared key yang disimpan saat edit server. OpenVPN, PPTP, dan WireGuard masih dapat dikelola admin tetapi belum dibuka untuk pemesanan mandiri pelanggan.
 2. Administrator membuat paket di **Paket VPN**: harga dalam rupiah, masa aktif, batas koneksi, protokol, dan server. Paket nonaktif tidak tampil di katalog pelanggan.
 3. Administrator mengisi rekening penerima di **Billing & invoice**. Rekening disalin ke setiap invoice saat dibuat agar perubahan rekening berikutnya tidak mengubah instruksi pada invoice lama.
 4. Pelanggan mendaftar dan memverifikasi email, masuk, memilih paket/server/protokol, lalu membuat invoice. Password VPN disimpan terenkripsi sampai akun berhasil dibuat pada server; pelanggan harus menyimpan password itu sendiri.

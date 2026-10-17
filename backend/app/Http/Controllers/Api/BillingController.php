@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProvisionVpnAccount;
 use App\Models\BillingSetting;
+use App\Models\OperationLog;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\VpnAccount;
@@ -20,7 +21,7 @@ use Illuminate\Validation\Rule;
 
 class BillingController extends Controller
 {
-    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp', 'openvpn', 'pptp'];
+    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp'];
 
     public function catalog(MikroTikAdapter $routerOs)
     {
@@ -179,6 +180,12 @@ class BillingController extends Controller
         $data = $request->validate(['admin_note' => ['required', 'string', 'max:1000']]);
         abort_unless($order->status === 'payment_submitted', 409, 'Only submitted payments can be rejected.');
         $order->update(['status' => 'pending_payment', 'payment_reference' => null, 'payment_note' => null, 'submitted_at' => null, 'admin_note' => $data['admin_note']]);
+        OperationLog::create([
+            'user_id' => $request->user()->id, 'vpn_server_id' => $order->vpn_server_id,
+            'vpn_account_id' => $order->vpn_account_id, 'operation' => 'reject_payment',
+            'status' => 'success', 'message' => $order->invoice_number.': '.$data['admin_note'],
+            'completed_at' => now(),
+        ]);
 
         return $order->fresh();
     }
@@ -223,6 +230,13 @@ class BillingController extends Controller
                 $accountId = $account->id;
             }
             $locked->update(['status' => 'paid', 'paid_at' => now(), 'vpn_account_id' => $account->id, 'encrypted_client_password' => null]);
+            OperationLog::create([
+                'user_id' => $request->user()->id, 'vpn_server_id' => $locked->vpn_server_id,
+                'vpn_account_id' => $account->id, 'operation' => 'confirm_payment',
+                'status' => 'success', 'message' => $locked->invoice_number,
+                'details' => ['amount_cents' => $locked->amount_cents, 'currency' => $locked->currency, 'payment_reference' => $locked->payment_reference],
+                'completed_at' => now(),
+            ]);
 
             return $accountId;
         });

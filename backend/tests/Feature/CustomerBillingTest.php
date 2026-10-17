@@ -72,6 +72,7 @@ class CustomerBillingTest extends TestCase
         $this->assertSame('unique-vpn-password-123', Crypt::decryptString($account->encrypted_provisioning_secret));
         $this->assertDatabaseCount('subscriptions', 1);
         $this->assertDatabaseHas('subscriptions', ['vpn_account_id' => $account->id, 'status' => 'pending_activation']);
+        $this->assertDatabaseHas('operation_logs', ['vpn_account_id' => $account->id, 'operation' => 'confirm_payment', 'user_id' => $admin->id]);
         Queue::assertPushed(ProvisionVpnAccount::class, 1);
         $this->assertNull($account->expires_at);
         $server->update(['adapter' => 'demo', 'is_demo' => true]);
