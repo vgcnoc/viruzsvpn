@@ -52,3 +52,141 @@
   color: #57d8ae;
   text-transform: capitalize;
 }
+
+/* Authentication entry: intentionally quiet and focused. */
+.login-page {
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(32, 116, 133, .22), transparent 34%),
+    linear-gradient(135deg, #07111c, #091522 58%, #07111c);
+}
+
+.login-card.auth-card {
+  width: min(440px, 100%);
+  padding: 34px;
+  border-color: #294056;
+  border-radius: 14px;
+  background: rgba(13, 25, 40, .96);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, .42), 0 1px 0 rgba(255, 255, 255, .025) inset;
+}
+
+.auth-card .brand.large {
+  margin-bottom: 31px;
+}
+
+.auth-card .brand-mark {
+  background: #103641;
+  border-color: #1b6270;
+}
+
+.auth-card h1 {
+  font-size: clamp(29px, 7vw, 34px);
+  line-height: 1.12;
+}
+
+.auth-card .muted {
+  max-width: 330px;
+  margin: 11px 0 0;
+  color: #91a4b8;
+  line-height: 1.6;
+}
+
+.auth-choice-actions {
+  display: grid;
+  gap: 10px;
+  margin: 30px 0 19px;
+}
+
+.auth-choice-actions .button,
+.auth-form .button {
+  min-height: 44px;
+  border-radius: 7px;
+}
+
+.auth-footnote {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding-top: 17px;
+  color: #71869a;
+  border-top: 1px solid #22364b;
+  font-size: 11px;
+}
+
+.auth-footnote svg {
+  color: #48d5ce;
+}
+
+.auth-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -6px 0 25px -7px;
+  padding: 6px 7px;
+  color: #91a7bb;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.auth-back:hover {
+  color: #e2f7f8;
+  background: #15283a;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 27px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+  color: #a9bac9;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 11px;
+  color: #e5f0f7;
+  background: #091522;
+  border: 1px solid #2a4056;
+  border-radius: 7px;
+  outline: 0;
+}
+
+.auth-form input:focus {
+  border-color: #49cfc9;
+  box-shadow: 0 0 0 3px rgba(55, 203, 198, .12);
+}
+
+.auth-switch {
+  margin: 21px 0 0;
+  color: #8195a8;
+  font-size: 12px;
+  text-align: center;
+}
+
+.auth-switch button {
+  padding: 0;
+  color: #57ddd7;
+  background: transparent;
+  border: 0;
+  font-weight: 700;
+}
+
+.auth-switch button:hover {
+  color: #9af2ee;
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .login-page { padding: 15px; }
+  .login-card.auth-card { padding: 27px 22px; }
+}

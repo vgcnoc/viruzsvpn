@@ -11,6 +11,33 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    public function register(Request $request)
+    {
+        if (User::query()->exists()) {
+            return response()->json([
+                'message' => 'Registration is unavailable after the first administrator has been created.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'min:2', 'max:120'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:12', 'confirmed'],
+        ]);
+
+        $user = User::create([
+            'name' => $data['name'],
+            'email' => $data['email'],
+            'password' => Hash::make($data['password']),
+            'role' => 'administrator',
+        ]);
+
+        return response()->json([
+            'token' => $user->createToken('dashboard')->plainTextToken,
+            'user' => $user->only(['id', 'name', 'email', 'role']),
+        ], 201);
+    }
+
     public function login(Request $request)
     {
         $data = $request->validate(['email' => ['required', 'email'], 'password' => ['required', 'string']]);

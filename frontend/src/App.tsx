@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Cable, ChevronRight, CircleDollarSign, Copy, Gauge, LayoutDashboard, LoaderCircle, LogOut, Menu, Pencil, Plus, Radio, Search, ServerCog, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react'
+import { Activity, ArrowLeft, Cable, ChevronRight, CircleDollarSign, Copy, Gauge, LayoutDashboard, LoaderCircle, LogOut, Menu, Pencil, Plus, Radio, Search, ServerCog, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
@@ -43,16 +43,37 @@ function App() {
   </div>
 }
 
+const loginSchema = z.object({ email: z.string().email('Enter a valid email address.'), password: z.string().min(8, 'Password must contain at least 8 characters.') })
+const registrationSchema = z.object({ name: z.string().trim().min(2, 'Enter at least 2 characters.').max(120), email: z.string().trim().email('Enter a valid email address.'), password: z.string().min(12, 'Use at least 12 characters.'), password_confirmation: z.string().min(1, 'Confirm your password.') }).refine((values) => values.password === values.password_confirmation, { path: ['password_confirmation'], message: 'Passwords do not match.' })
+type LoginValues = z.infer<typeof loginSchema>
+type RegistrationValues = z.infer<typeof registrationSchema>
+type AuthResponse = { token: string; user: AuthUser }
+
 function Login({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
-  const schema = z.object({ email: z.string().email('Enter a valid email address.'), password: z.string().min(8, 'Password must contain at least 8 characters.') })
-  type LoginValues = z.infer<typeof schema>
-  const { register, handleSubmit, formState: { errors } } = useForm<LoginValues>({ resolver: zodResolver(schema), defaultValues: { email: 'admin@vpn.local', password: 'password' } })
-  const mutation = useMutation({ mutationFn: (values: LoginValues) => api.post<{ token: string }>('/auth/login', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
-  return <div className="login-page"><div className="login-card"><div className="brand large"><span className="brand-mark"><ShieldCheck size={24} /></span><span>VPN<span>OPS</span></span></div><p className="eyebrow">ADMINISTRATOR CONSOLE</p><h1>Secure network operations.</h1><p className="muted">Sign in to manage your VPN control plane.</p><form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
-    <label>Email<input {...register('email')} autoComplete="email" /></label>{errors.email && <small className="field-error">{errors.email.message}</small>}
-    <label>Password<input {...register('password')} type="password" autoComplete="current-password" /></label>{errors.password && <small className="field-error">{errors.password.message}</small>}
-    {mutation.isError && <p className="form-error">{apiError(mutation.error)}</p>}<button className="button primary wide" disabled={mutation.isPending}>{mutation.isPending && <LoaderCircle className="spin" size={16} />} Sign in</button>
-  </form><div className="login-note"><b>Local demo</b><br />admin@vpn.local / password</div></div></div>
+  const [screen, setScreen] = useState<'welcome' | 'login' | 'register'>('welcome')
+  const { register: registerLogin, handleSubmit: submitLogin, formState: { errors: loginErrors } } = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } })
+  const { register: registerAccount, handleSubmit: submitAccount, formState: { errors: registrationErrors } } = useForm<RegistrationValues>({ resolver: zodResolver(registrationSchema), defaultValues: { name: '', email: '', password: '', password_confirmation: '' } })
+  const signIn = useMutation({ mutationFn: (values: LoginValues) => api.post<AuthResponse>('/auth/login', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
+  const createAccount = useMutation({ mutationFn: (values: RegistrationValues) => api.post<AuthResponse>('/auth/register', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
+  const goBack = () => { signIn.reset(); createAccount.reset(); setScreen('welcome') }
+
+  return <div className="login-page"><main className={`login-card auth-card ${screen === 'welcome' ? 'auth-choice' : ''}`}>
+    {screen !== 'welcome' && <button className="auth-back" type="button" onClick={goBack}><ArrowLeft size={16} />Back</button>}
+    <div className="brand large"><span className="brand-mark"><ShieldCheck size={24} /></span><span>VPN<span>OPS</span></span></div>
+    {screen === 'welcome' && <><p className="eyebrow">VPN CONTROL PLANE</p><h1>Access with confidence.</h1><p className="muted">A focused workspace for managing trusted VPN infrastructure.</p><div className="auth-choice-actions"><button className="button primary wide" type="button" onClick={() => setScreen('login')}>Sign in</button><button className="button quiet wide" type="button" onClick={() => setScreen('register')}>Create account</button></div><p className="auth-footnote"><ShieldCheck size={14} />Authorized administrator access only.</p></>}
+    {screen === 'login' && <><p className="eyebrow">WELCOME BACK</p><h1>Sign in</h1><p className="muted">Use your administrator credentials to continue.</p><form className="auth-form" onSubmit={submitLogin((values) => signIn.mutate(values))}>
+      <label>Email address<input {...registerLogin('email')} autoComplete="email" /></label>{loginErrors.email && <small className="field-error">{loginErrors.email.message}</small>}
+      <label>Password<input {...registerLogin('password')} type="password" autoComplete="current-password" /></label>{loginErrors.password && <small className="field-error">{loginErrors.password.message}</small>}
+      {signIn.isError && <p className="form-error">{apiError(signIn.error)}</p>}<button className="button primary wide" disabled={signIn.isPending}>{signIn.isPending && <LoaderCircle className="spin" size={16} />}Sign in</button>
+    </form><p className="auth-switch">Setting up a new control plane? <button type="button" onClick={() => setScreen('register')}>Create account</button></p></>}
+    {screen === 'register' && <><p className="eyebrow">INITIAL SETUP</p><h1>Create administrator</h1><p className="muted">This option is available only before the first administrator account is created.</p><form className="auth-form" onSubmit={submitAccount((values) => createAccount.mutate(values))}>
+      <label>Full name<input {...registerAccount('name')} autoComplete="name" /></label>{registrationErrors.name && <small className="field-error">{registrationErrors.name.message}</small>}
+      <label>Email address<input {...registerAccount('email')} autoComplete="email" /></label>{registrationErrors.email && <small className="field-error">{registrationErrors.email.message}</small>}
+      <label>Password<input {...registerAccount('password')} type="password" autoComplete="new-password" /></label>{registrationErrors.password && <small className="field-error">{registrationErrors.password.message}</small>}
+      <label>Confirm password<input {...registerAccount('password_confirmation')} type="password" autoComplete="new-password" /></label>{registrationErrors.password_confirmation && <small className="field-error">{registrationErrors.password_confirmation.message}</small>}
+      {createAccount.isError && <p className="form-error">{apiError(createAccount.error)}</p>}<button className="button primary wide" disabled={createAccount.isPending}>{createAccount.isPending && <LoaderCircle className="spin" size={16} />}Create administrator</button>
+    </form><p className="auth-switch">Already have an account? <button type="button" onClick={() => setScreen('login')}>Sign in</button></p></>}
+  </main></div>
 }
 
 function Overview() {

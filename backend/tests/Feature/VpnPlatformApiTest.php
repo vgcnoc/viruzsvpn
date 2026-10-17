@@ -17,6 +17,25 @@ class VpnPlatformApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_registration_creates_only_the_first_administrator(): void
+    {
+        $this->postJson('/api/auth/register', [
+            'name' => 'First Administrator',
+            'email' => 'first@example.test',
+            'password' => 'first-secure-password',
+            'password_confirmation' => 'first-secure-password',
+        ])->assertCreated()->assertJsonPath('user.email', 'first@example.test')->assertJsonPath('user.role', 'administrator')->assertJsonStructure(['token']);
+
+        $this->assertDatabaseHas('users', ['email' => 'first@example.test', 'role' => 'administrator']);
+
+        $this->postJson('/api/auth/register', [
+            'name' => 'Second Administrator',
+            'email' => 'second@example.test',
+            'password' => 'second-secure-password',
+            'password_confirmation' => 'second-secure-password',
+        ])->assertForbidden()->assertJsonPath('message', 'Registration is unavailable after the first administrator has been created.');
+    }
+
     public function test_administrator_can_log_in_and_read_dashboard(): void
     {
         $user = User::factory()->create(['email' => 'admin@example.test', 'password' => 'password']);
