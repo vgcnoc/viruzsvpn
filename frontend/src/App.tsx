@@ -19,23 +19,35 @@ const nav = [
 
 type DashboardData = { summary: { servers: number; servers_online: number; accounts_active: number; accounts_expiring_soon: number }; recent_operations: Array<{ id: number; operation: string; status: string; created_at: string; server?: { name: string } }>; demo_data: boolean }
 type AuthUser = { id: number; name: string; email: string; role: string }
+type RegistrationResponse = { message: string; email: string; verification_required: boolean }
 const money = (amount: number, currency: string) => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
 const date = (value?: string) => value ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(value)) : '—'
 const statusClass = (status: string) => `status ${['online', 'active', 'healthy', 'success'].includes(status) ? 'good' : ['offline', 'failed', 'revoked'].includes(status) ? 'bad' : status === 'demo' ? 'demo' : 'warn'}`
 
+function Brand({ large = false }: { large?: boolean }) {
+  return <div className={`brand ${large ? 'large' : ''}`}><span className="brand-mark"><ShieldCheck size={large ? 24 : 22} /></span><span>vir<span>VPN</span></span></div>
+}
+
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('vpn-platform-token'))
   const [mobileOpen, setMobileOpen] = useState(false)
+  const session = useQuery({ queryKey: ['auth-me'], enabled: Boolean(token), retry: false, queryFn: () => api.get<AuthUser>('/auth/me').then((r) => r.data) })
+  useEffect(() => { if (session.isError) { localStorage.removeItem('vpn-platform-token'); setToken(null) } }, [session.isError])
+  const signOut = () => { void api.post('/auth/logout').catch(() => undefined); localStorage.removeItem('vpn-platform-token'); setToken(null) }
+
   if (!token) return <Login onAuthenticated={(value) => { localStorage.setItem('vpn-platform-token', value); setToken(value) }} />
+  if (session.isLoading || session.isError || !session.data) return <SessionLoading />
+  if (session.data.role !== 'administrator') return <CustomerPortal user={session.data} onSignOut={signOut} />
+
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
-      <div className="brand"><span className="brand-mark"><ShieldCheck size={22} /></span><span>VPN<span>OPS</span></span></div>
+      <Brand />
       <p className="workspace-label">OPERATIONS</p>
       <nav>{nav.map(({ to, label, icon: Icon }) => <NavLink end={to === '/'} to={to} key={to} onClick={() => setMobileOpen(false)}><Icon size={18} />{label}</NavLink>)}</nav>
       <div className="sidebar-footer"><div className="security-chip"><ShieldCheck size={16} /><span>Secure control plane<br /><small>Sanctum token session</small></span></div></div>
     </aside>
     <main>
-      <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle navigation"><Menu size={20} /></button><div className="crumb"><span>Control plane</span><ChevronRight size={14} /><b>Network operations</b></div><div className="topbar-actions"><span className="connection"><i /> API connected</span><button className="avatar" title="Administrator">A</button><button className="icon-button" aria-label="Sign out" onClick={() => { localStorage.removeItem('vpn-platform-token'); setToken(null) }}><LogOut size={18} /></button></div></header>
+      <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle navigation"><Menu size={20} /></button><div className="crumb"><span>Control plane</span><ChevronRight size={14} /><b>Network operations</b></div><div className="topbar-actions"><span className="connection"><i /> API connected</span><button className="avatar" title="Administrator">A</button><button className="icon-button" aria-label="Sign out" onClick={signOut}><LogOut size={18} /></button></div></header>
       <section className="content"><Routes>
         <Route path="/" element={<Overview />} /><Route path="/servers" element={<Servers />} /><Route path="/accounts" element={<Accounts />} /><Route path="/plans" element={<Plans />} /><Route path="/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/" replace />} />
       </Routes></section>
@@ -50,39 +62,52 @@ type RegistrationValues = z.infer<typeof registrationSchema>
 type AuthResponse = { token: string; user: AuthUser }
 
 function Login({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
-  const [screen, setScreen] = useState<'welcome' | 'login' | 'register'>('welcome')
+  const [screen, setScreen] = useState<'welcome' | 'login' | 'register' | 'check-email'>('welcome')
+  const [registeredEmail, setRegisteredEmail] = useState('')
+  const [emailVerified, setEmailVerified] = useState(false)
   const { register: registerLogin, handleSubmit: submitLogin, formState: { errors: loginErrors } } = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: '', password: '' } })
   const { register: registerAccount, handleSubmit: submitAccount, formState: { errors: registrationErrors } } = useForm<RegistrationValues>({ resolver: zodResolver(registrationSchema), defaultValues: { name: '', email: '', password: '', password_confirmation: '' } })
   const signIn = useMutation({ mutationFn: (values: LoginValues) => api.post<AuthResponse>('/auth/login', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
-  const createAccount = useMutation({ mutationFn: (values: RegistrationValues) => api.post<AuthResponse>('/auth/register', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
-  const goBack = () => { signIn.reset(); createAccount.reset(); setScreen('welcome') }
+  const createAccount = useMutation({ mutationFn: (values: RegistrationValues) => api.post<RegistrationResponse>('/auth/register', values).then((r) => r.data), onSuccess: (data) => { setRegisteredEmail(data.email); setScreen('check-email') } })
+  const resendVerification = useMutation({ mutationFn: (email: string) => api.post<{ message: string }>('/auth/email/verification-notification', { email }).then((r) => r.data) })
+  useEffect(() => { if (new URLSearchParams(window.location.search).get('email_verified') === '1') { setEmailVerified(true); setScreen('login'); window.history.replaceState({}, document.title, window.location.pathname) } }, [])
+  const goBack = () => { signIn.reset(); createAccount.reset(); resendVerification.reset(); setScreen('welcome') }
 
   return <div className="login-page"><div className="auth-shell">
     <aside className="auth-showcase">
-      <div className="brand large"><span className="brand-mark"><ShieldCheck size={24} /></span><span>VPN<span>OPS</span></span></div>
-      <div className="auth-showcase-copy"><p className="eyebrow">NETWORK OPERATIONS PLATFORM</p><h1>VPN management,<br /><span>made deliberate.</span></h1><p>One considered workspace for the infrastructure, accounts, and operational decisions that keep your network moving.</p></div>
-      <div className="auth-network-visual" aria-hidden="true"><div className="visual-label"><span />CONTROL PLANE</div><div className="visual-grid"><i className="visual-line line-one" /><i className="visual-line line-two" /><i className="visual-line line-three" /><b className="visual-node node-core"><ShieldCheck size={18} /></b><b className="visual-node node-one" /><b className="visual-node node-two" /><b className="visual-node node-three" /><div className="visual-card"><small>OPERATIONAL ACCESS</small><strong>Designed for secure, focused work.</strong></div></div></div>
+      <Brand large />
+      <div className="auth-showcase-copy"><p className="eyebrow">PRIVATE VPN, MADE SIMPLE</p><h1>Secure access,<br /><span>on your terms.</span></h1><p>Create one account to manage the VPN services and connections you choose, with security built into every step.</p></div>
+      <div className="auth-network-visual" aria-hidden="true"><div className="visual-label"><span />VIRVPN NETWORK</div><div className="visual-grid"><i className="visual-line line-one" /><i className="visual-line line-two" /><i className="visual-line line-three" /><b className="visual-node node-core"><ShieldCheck size={18} /></b><b className="visual-node node-one" /><b className="visual-node node-two" /><b className="visual-node node-three" /><div className="visual-card"><small>ACCOUNT PROTECTION</small><strong>Verified access before service activation.</strong></div></div></div>
       <div className="auth-capabilities"><span><b>01</b>Protected access</span><span><b>02</b>Central control</span><span><b>03</b>Clear operations</span></div>
-      <p className="auth-showcase-footer">Built for teams operating trusted VPN infrastructure.</p>
+      <p className="auth-showcase-footer">A secure starting point for your VPN journey.</p>
     </aside>
     <main className={`login-card auth-card ${screen === 'welcome' ? 'auth-choice' : ''}`}>
       <div className="auth-card-top"><span className="auth-card-dot" /><span>SECURE SESSION</span></div>
-      {screen !== 'welcome' && <button className="auth-back" type="button" onClick={goBack}><ArrowLeft size={16} />Back</button>}
-      {screen === 'welcome' && <><p className="eyebrow">ADMINISTRATOR ACCESS</p><h1>Welcome to the control plane.</h1><p className="muted">Sign in to continue managing your VPN environment, or set up its first administrator.</p><div className="auth-choice-actions"><button className="button primary wide" type="button" onClick={() => setScreen('login')}>Sign in to VPNOPS</button><button className="button quiet wide" type="button" onClick={() => setScreen('register')}>Create administrator account</button></div><p className="auth-footnote"><ShieldCheck size={14} />Your credentials are never shown or stored in this browser.</p></>}
-    {screen === 'login' && <><p className="eyebrow">WELCOME BACK</p><h1>Sign in</h1><p className="muted">Use your administrator credentials to continue.</p><form className="auth-form" onSubmit={submitLogin((values) => signIn.mutate(values))}>
+      {screen !== 'welcome' && screen !== 'check-email' && <button className="auth-back" type="button" onClick={goBack}><ArrowLeft size={16} />Back</button>}
+      {screen === 'welcome' && <><p className="eyebrow">YOUR VIRVPN ACCOUNT</p><h1>VPN access starts here.</h1><p className="muted">Sign in to your account or register first. New accounts are protected with email verification.</p><div className="auth-choice-actions"><button className="button primary wide" type="button" onClick={() => setScreen('login')}>Sign in to virVPN</button><button className="button quiet wide" type="button" onClick={() => setScreen('register')}>Register</button></div><p className="auth-footnote"><ShieldCheck size={14} />Your credentials are never shown or stored in this browser.</p></>}
+    {screen === 'login' && <><p className="eyebrow">WELCOME BACK</p><h1>Sign in</h1><p className="muted">Use your verified virVPN account to continue.</p>{emailVerified && <p className="auth-success">Email verified. You can now sign in.</p>}<form className="auth-form" onSubmit={submitLogin((values) => signIn.mutate(values))}>
       <label>Email address<input {...registerLogin('email')} autoComplete="email" /></label>{loginErrors.email && <small className="field-error">{loginErrors.email.message}</small>}
       <label>Password<input {...registerLogin('password')} type="password" autoComplete="current-password" /></label>{loginErrors.password && <small className="field-error">{loginErrors.password.message}</small>}
       {signIn.isError && <p className="form-error">{apiError(signIn.error)}</p>}<button className="button primary wide" disabled={signIn.isPending}>{signIn.isPending && <LoaderCircle className="spin" size={16} />}Sign in</button>
-    </form><p className="auth-switch">Setting up a new control plane? <button type="button" onClick={() => setScreen('register')}>Create account</button></p></>}
-    {screen === 'register' && <><p className="eyebrow">INITIAL SETUP</p><h1>Create administrator</h1><p className="muted">This option is available only before the first administrator account is created.</p><form className="auth-form" onSubmit={submitAccount((values) => createAccount.mutate(values))}>
+    </form><p className="auth-switch">New to virVPN? <button type="button" onClick={() => setScreen('register')}>Register</button></p></>}
+    {screen === 'register' && <><p className="eyebrow">CREATE YOUR ACCOUNT</p><h1>Register for virVPN</h1><p className="muted">We will send a verification link to your email before you can sign in.</p><form className="auth-form" onSubmit={submitAccount((values) => createAccount.mutate(values))}>
       <label>Full name<input {...registerAccount('name')} autoComplete="name" /></label>{registrationErrors.name && <small className="field-error">{registrationErrors.name.message}</small>}
       <label>Email address<input {...registerAccount('email')} autoComplete="email" /></label>{registrationErrors.email && <small className="field-error">{registrationErrors.email.message}</small>}
       <label>Password<input {...registerAccount('password')} type="password" autoComplete="new-password" /></label>{registrationErrors.password && <small className="field-error">{registrationErrors.password.message}</small>}
       <label>Confirm password<input {...registerAccount('password_confirmation')} type="password" autoComplete="new-password" /></label>{registrationErrors.password_confirmation && <small className="field-error">{registrationErrors.password_confirmation.message}</small>}
-      {createAccount.isError && <p className="form-error">{apiError(createAccount.error)}</p>}<button className="button primary wide" disabled={createAccount.isPending}>{createAccount.isPending && <LoaderCircle className="spin" size={16} />}Create administrator</button>
+      {createAccount.isError && <p className="form-error">{apiError(createAccount.error)}</p>}<button className="button primary wide" disabled={createAccount.isPending}>{createAccount.isPending && <LoaderCircle className="spin" size={16} />}Register account</button>
     </form><p className="auth-switch">Already have an account? <button type="button" onClick={() => setScreen('login')}>Sign in</button></p></>}
+    {screen === 'check-email' && <><p className="eyebrow">VERIFY YOUR EMAIL</p><h1>Check your inbox.</h1><p className="muted">We sent a verification link to <b>{registeredEmail}</b>. Open the link to activate your virVPN account.</p>{resendVerification.isSuccess && <p className="auth-success">A new verification link has been sent.</p>}<div className="auth-choice-actions"><button className="button primary wide" type="button" disabled={resendVerification.isPending || !registeredEmail} onClick={() => resendVerification.mutate(registeredEmail)}>{resendVerification.isPending && <LoaderCircle className="spin" size={16} />}Resend verification email</button><button className="button quiet wide" type="button" onClick={() => setScreen('login')}>Return to sign in</button></div><p className="auth-footnote"><ShieldCheck size={14} />For your security, unverified accounts cannot sign in.</p></>}
     </main>
   </div></div>
+}
+
+function SessionLoading() {
+  return <div className="login-page"><div className="session-loading"><LoaderCircle className="spin" size={22} /><span>Restoring your secure session…</span></div></div>
+}
+
+function CustomerPortal({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
+  return <div className="customer-shell"><header className="customer-header"><Brand /><div><span>{user.email}</span><button className="icon-button" aria-label="Sign out" onClick={onSignOut}><LogOut size={18} /></button></div></header><main className="customer-content"><p className="eyebrow">CUSTOMER PORTAL</p><h1>Welcome, {user.name}.</h1><p className="customer-intro">Your email is verified and your virVPN account is ready. Your VPN services and account activity will appear here as they are activated.</p><section className="customer-ready"><div><span className="brand-mark"><ShieldCheck size={20} /></span><div><p>Account status</p><h2>Email verified</h2></div></div><span className="status good">ready</span></section><section className="customer-empty"><ShieldCheck size={22} /><h2>No VPN services yet</h2><p>When a VPN plan or connection is added to your account, you will be able to view and manage it from this portal.</p></section></main></div>
 }
 
 function Overview() {
@@ -114,7 +139,7 @@ function Settings() {
     <div className="two-column settings-panels"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">ACCOUNT</p><h2>Edit profile</h2></div><Pencil size={20} /></div>{profile.isLoading ? <Skeleton rows={3} /> : <form className="form-grid panel-form" onSubmit={submitProfile((values) => saveProfile.mutate(values))}><label className="span-2">Full name<input autoComplete="name" {...registerProfile('name')} />{profileErrors.name && <small className="field-error">{profileErrors.name.message}</small>}</label><label className="span-2">Email address<input autoComplete="email" {...registerProfile('email')} />{profileErrors.email && <small className="field-error">{profileErrors.email.message}</small>}</label><div className="account-role span-2"><span>Role</span><b>{profile.data?.role ?? 'administrator'}</b></div>{saveProfile.isError && <p className="form-error span-2">{apiError(saveProfile.error)}</p>}<div className="modal-actions span-2"><button className="button primary" disabled={saveProfile.isPending}>{saveProfile.isPending && <LoaderCircle className="spin" size={16} />}Save profile</button></div></form>}<p className="panel-footnote">Changes apply to the administrator account currently signed in.</p></section>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">SECURITY</p><h2>Change password</h2></div><ShieldCheck size={20} /></div><form className="form-grid panel-form" onSubmit={submitPassword((values) => changePassword.mutate(values))}><label className="span-2">Current password<input type="password" autoComplete="current-password" {...registerPassword('current_password')} />{passwordErrors.current_password && <small className="field-error">{passwordErrors.current_password.message}</small>}</label><label>New password<input type="password" autoComplete="new-password" {...registerPassword('password')} />{passwordErrors.password && <small className="field-error">{passwordErrors.password.message}</small>}</label><label>Confirm password<input type="password" autoComplete="new-password" {...registerPassword('password_confirmation')} />{passwordErrors.password_confirmation && <small className="field-error">{passwordErrors.password_confirmation.message}</small>}</label>{changePassword.isError && <p className="form-error span-2">{apiError(changePassword.error)}</p>}<div className="modal-actions span-2"><button className="button primary" disabled={changePassword.isPending}>{changePassword.isPending && <LoaderCircle className="spin" size={16} />}Update password</button></div></form><p className="panel-footnote">Use at least 12 characters. Other active browser sessions will be signed out.</p></section></div>
     <div className="two-column settings-panels"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">CONNECTIVITY</p><h2>Application endpoint</h2></div><Cable size={20} /></div><div className="readiness"><Readiness label="API endpoint" value={String(api.defaults.baseURL ?? 'http://127.0.0.1:8000/api')} positive /><Readiness label="Authentication" value="Sanctum bearer token" positive /><Readiness label="Session storage" value="This browser only" positive /></div><p className="panel-footnote">Change deployment endpoints and secrets through the server environment, never through a browser form.</p></section>
-      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">ROUTEROS</p><h2>Registration checklist</h2></div><ShieldCheck size={20} /></div><div className="readiness"><Readiness label="API service" value="API-SSL preferred" positive /><Readiness label="Allowed CIDR" value="VPNOPS source IP only" positive /><Readiness label="Certificate" value="Required for verified TLS" /></div><p className="panel-footnote">Use the server’s public address as the endpoint. The allowed CIDR must be the source address of the machine running VPNOPS—not the RouterOS address.</p></section></div>
+      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">ROUTEROS</p><h2>Registration checklist</h2></div><ShieldCheck size={20} /></div><div className="readiness"><Readiness label="API service" value="API-SSL preferred" positive /><Readiness label="Allowed CIDR" value="virVPN source IP only" positive /><Readiness label="Certificate" value="Required for verified TLS" /></div><p className="panel-footnote">Use the server’s public address as the endpoint. The allowed CIDR must be the source address of the machine running virVPN—not the RouterOS address.</p></section></div>
   </>
 }
 
@@ -135,16 +160,16 @@ type ServerValues = z.infer<typeof serverSchema>
 const routerOsQuote = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/[\r\n]/g, '')}"`
 function buildRouterOsBootstrap(value: ServerValues) {
   const apiService = value.routeros_api_ssl ? 'api-ssl' : 'api'
-  const certificateCheck = value.routeros_api_ssl ? `:put "VPNOPS: checking API-SSL certificate..."
+  const certificateCheck = value.routeros_api_ssl ? `:put "virVPN: checking API-SSL certificate..."
 /certificate
 :if ([:len [find where name=$certificateName]] = 0) do={
-    :put ("VPNOPS ERROR: certificate " . $certificateName . " was not found. No configuration was changed.")
-    :error ("VPNOPS: create or import the certificate before enabling API-SSL.")
+    :put ("virVPN ERROR: certificate " . $certificateName . " was not found. No configuration was changed.")
+    :error ("virVPN: create or import the certificate before enabling API-SSL.")
 }
 ` : ''
   const certificateSetting = value.routeros_api_ssl ? ' certificate=$certificateName' : ''
-  return `# VPNOPS RouterOS bootstrap — paste from a trusted terminal session.
-# This creates or updates only the dedicated VPNOPS API user and API service.
+  return `# virVPN RouterOS bootstrap — paste from a trusted terminal session.
+# This creates or updates only the dedicated virVPN API user and API service.
 # It does not alter VPN profiles or firewall rules.
 :local vpnopsUser ${routerOsQuote(value.username?.trim() ?? '')}
 :local vpnopsPassword ${routerOsQuote(value.secret ?? '')}
@@ -160,14 +185,14 @@ ${certificateCheck}/user group
 
 /user
 :if ([:len [find where name=$vpnopsUser]] = 0) do={
-    add name=$vpnopsUser password=$vpnopsPassword group="vpnops-api" comment="VPNOPS control plane"
+    add name=$vpnopsUser password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
 } else={
-    set [find where name=$vpnopsUser] password=$vpnopsPassword group="vpnops-api" comment="VPNOPS control plane"
+    set [find where name=$vpnopsUser] password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
 }
 
 /ip service
 set ${apiService} disabled=no port=${value.port} address=$controlPlaneCidr${certificateSetting}
-:put "VPNOPS OK: ${apiService} is enabled on TCP ${value.port}."
+:put "virVPN OK: ${apiService} is enabled on TCP ${value.port}."
 
 # If this router has an input firewall with a final drop rule, allow TCP ${value.port}
 # only from ${value.routeros_allowed_cidr} before that drop rule. Do not expose this API publicly.`
@@ -187,7 +212,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
   const finishBootstrap = () => { setBootstrapScript(null); onSuccess() }
   const copyBootstrap = async () => { if (!bootstrapScript) return; try { await navigator.clipboard.writeText(bootstrapScript); setCopyMessage('Script copied. Paste it into the RouterOS terminal.'); } catch { setCopyMessage('Clipboard access was blocked. Select the script and copy it manually.'); } }
   if (bootstrapScript) return <Modal title="RouterOS bootstrap script" close={finishBootstrap}><p className="form-help">Server registered. This script is shown only now and contains the API password; keep it out of chat logs and paste it only into the intended CHR.</p><p className="script-warning">Before pasting: make sure the certificate name exists on RouterOS and the control-plane CIDR is correct. The script does not change firewall rules.</p><textarea className="script-output" readOnly aria-label="RouterOS bootstrap script" value={bootstrapScript} rows={21} /><p className="form-help">It creates or updates a dedicated <span className="mono">vpnops-api</span> user group, restricts the API service to the specified CIDR, and leaves VPN configuration unchanged.</p>{copyMessage && <p className="form-help">{copyMessage}</p>}<div className="modal-actions"><button type="button" className="button quiet" onClick={finishBootstrap}>Done</button><button type="button" className="button primary" onClick={copyBootstrap}><Copy size={16} />Copy script</button></div></Modal>
-  return <Modal title={server ? 'Edit server' : 'Register server'} close={close}><form className="form-grid" onSubmit={handleSubmit(submit)}><label>Name<input {...register('name')} placeholder="Singapore Edge 01" /></label><label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux agent (HTTPS)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label><label>Hostname / IP<input {...register('hostname')} placeholder="vpn-edge.example.net" /></label><label>Port<input type="number" {...register('port')} />{adapter === 'mikrotik-routeros' && <small>API-SSL normally uses 8729; API uses 8728.</small>}</label><label className="span-2">Location<input {...register('location')} placeholder="Singapore, SG" /></label><label className="span-2">Supported protocols<input {...register('protocols')} placeholder="wireguard,openvpn" /><small>Comma-separated: wireguard, openvpn, l2tp-ipsec, sstp, ppp, pptp.</small></label>{adapter === 'linux-agent' && <label className="span-2">Linux agent shared secret<input type="password" {...register('secret')} placeholder={server ? 'Leave blank to keep the stored secret' : 'Minimum 32 characters; stored encrypted'} /></label>}{adapter === 'mikrotik-routeros' && <><label>RouterOS API username<input autoComplete="username" {...register('username')} placeholder={server ? 'Enter again only when changing credentials' : 'vpnops-api'} /></label><label>RouterOS API password<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Leave blank to keep stored credentials' : 'Stored encrypted; never shown again'} /></label><label className="check span-2"><input type="checkbox" {...register('routeros_api_ssl')} /> Use RouterOS API-SSL (recommended)</label><label className="span-2">Allowed control-plane CIDR<input {...register('routeros_allowed_cidr')} placeholder="203.0.113.10/32" required={requiresRouterOsBootstrap} /><small>Enter the public IP of this VPNOPS machine, not the RouterOS hostname or IP. Only this IPv4 host or subnet can reach the API.</small></label>{errors.routeros_allowed_cidr && <small className="field-error span-2">{errors.routeros_allowed_cidr.message}</small>}{routerosApiSsl && <><label className="span-2">RouterOS API-SSL certificate name<input {...register('routeros_certificate')} placeholder="vpnops-api" required={requiresRouterOsBootstrap} /><small>Create or import this certificate on the CHR first. Its name must match RouterOS exactly.</small></label>{errors.routeros_certificate && <small className="field-error span-2">{errors.routeros_certificate.message}</small>}</>}</>}<label className="check span-2"><input type="checkbox" {...register('tls_verify')} /> Verify the endpoint TLS certificate</label>{Object.keys(errors).length > 0 && <p className="form-error span-2">Check the required fields and port range.</p>}{save.isError && <p className="form-error span-2">{apiError(save.error)}</p>}<div className="modal-actions span-2"><button type="button" className="button quiet" onClick={close}>Cancel</button><button className="button primary" disabled={save.isPending}>{save.isPending && <LoaderCircle className="spin" size={16} />}{server ? 'Save changes' : 'Register server'}</button></div></form></Modal>
+  return <Modal title={server ? 'Edit server' : 'Register server'} close={close}><form className="form-grid" onSubmit={handleSubmit(submit)}><label>Name<input {...register('name')} placeholder="Singapore Edge 01" /></label><label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux agent (HTTPS)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label><label>Hostname / IP<input {...register('hostname')} placeholder="vpn-edge.example.net" /></label><label>Port<input type="number" {...register('port')} />{adapter === 'mikrotik-routeros' && <small>API-SSL normally uses 8729; API uses 8728.</small>}</label><label className="span-2">Location<input {...register('location')} placeholder="Singapore, SG" /></label><label className="span-2">Supported protocols<input {...register('protocols')} placeholder="wireguard,openvpn" /><small>Comma-separated: wireguard, openvpn, l2tp-ipsec, sstp, ppp, pptp.</small></label>{adapter === 'linux-agent' && <label className="span-2">Linux agent shared secret<input type="password" {...register('secret')} placeholder={server ? 'Leave blank to keep the stored secret' : 'Minimum 32 characters; stored encrypted'} /></label>}{adapter === 'mikrotik-routeros' && <><label>RouterOS API username<input autoComplete="username" {...register('username')} placeholder={server ? 'Enter again only when changing credentials' : 'vpnops-api'} /></label><label>RouterOS API password<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Leave blank to keep stored credentials' : 'Stored encrypted; never shown again'} /></label><label className="check span-2"><input type="checkbox" {...register('routeros_api_ssl')} /> Use RouterOS API-SSL (recommended)</label><label className="span-2">Allowed control-plane CIDR<input {...register('routeros_allowed_cidr')} placeholder="203.0.113.10/32" required={requiresRouterOsBootstrap} /><small>Enter the public IP of this virVPN machine, not the RouterOS hostname or IP. Only this IPv4 host or subnet can reach the API.</small></label>{errors.routeros_allowed_cidr && <small className="field-error span-2">{errors.routeros_allowed_cidr.message}</small>}{routerosApiSsl && <><label className="span-2">RouterOS API-SSL certificate name<input {...register('routeros_certificate')} placeholder="vpnops-api" required={requiresRouterOsBootstrap} /><small>Create or import this certificate on the CHR first. Its name must match RouterOS exactly.</small></label>{errors.routeros_certificate && <small className="field-error span-2">{errors.routeros_certificate.message}</small>}</>}</>}<label className="check span-2"><input type="checkbox" {...register('tls_verify')} /> Verify the endpoint TLS certificate</label>{Object.keys(errors).length > 0 && <p className="form-error span-2">Check the required fields and port range.</p>}{save.isError && <p className="form-error span-2">{apiError(save.error)}</p>}<div className="modal-actions span-2"><button type="button" className="button quiet" onClick={close}>Cancel</button><button className="button primary" disabled={save.isPending}>{save.isPending && <LoaderCircle className="spin" size={16} />}{server ? 'Save changes' : 'Register server'}</button></div></form></Modal>
 }
 
 function Accounts() {

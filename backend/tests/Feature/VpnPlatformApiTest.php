@@ -9,7 +9,10 @@ use App\Models\VpnAccount;
 use App\Models\VpnServer;
 use App\Services\Servers\DriverFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\URL;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -17,23 +20,34 @@ class VpnPlatformApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_registration_creates_only_the_first_administrator(): void
+    public function test_customer_registration_requires_email_verification_before_sign_in(): void
     {
-        $this->postJson('/api/auth/register', [
-            'name' => 'First Administrator',
-            'email' => 'first@example.test',
-            'password' => 'first-secure-password',
-            'password_confirmation' => 'first-secure-password',
-        ])->assertCreated()->assertJsonPath('user.email', 'first@example.test')->assertJsonPath('user.role', 'administrator')->assertJsonStructure(['token']);
-
-        $this->assertDatabaseHas('users', ['email' => 'first@example.test', 'role' => 'administrator']);
+        Notification::fake();
 
         $this->postJson('/api/auth/register', [
-            'name' => 'Second Administrator',
-            'email' => 'second@example.test',
-            'password' => 'second-secure-password',
-            'password_confirmation' => 'second-secure-password',
-        ])->assertForbidden()->assertJsonPath('message', 'Registration is unavailable after the first administrator has been created.');
+            'name' => 'Customer One',
+            'email' => 'customer@example.test',
+            'password' => 'customer-secure-password',
+            'password_confirmation' => 'customer-secure-password',
+        ])->assertCreated()->assertJsonPath('email', 'customer@example.test')->assertJsonPath('verification_required', true)->assertJsonMissing(['token']);
+
+        $customer = User::where('email', 'customer@example.test')->firstOrFail();
+        $this->assertSame('customer', $customer->role);
+        $this->assertNull($customer->email_verified_at);
+        Notification::assertSentTo($customer, VerifyEmail::class);
+
+        $this->postJson('/api/auth/login', ['email' => $customer->email, 'password' => 'customer-secure-password'])
+            ->assertForbidden()->assertJsonPath('code', 'email_verification_required');
+
+        $url = URL::temporarySignedRoute('verification.verify', now()->addMinutes(10), [
+            'id' => $customer->id,
+            'hash' => sha1($customer->getEmailForVerification()),
+        ]);
+        $this->get($url)->assertRedirect(config('app.frontend_url').'?email_verified=1');
+
+        $this->assertNotNull($customer->fresh()->email_verified_at);
+        $this->postJson('/api/auth/login', ['email' => $customer->email, 'password' => 'customer-secure-password'])
+            ->assertOk()->assertJsonPath('user.role', 'customer')->assertJsonStructure(['token']);
     }
 
     public function test_administrator_can_log_in_and_read_dashboard(): void

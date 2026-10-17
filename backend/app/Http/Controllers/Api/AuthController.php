@@ -13,12 +13,6 @@ class AuthController extends Controller
 {
     public function register(Request $request)
     {
-        if (User::query()->exists()) {
-            return response()->json([
-                'message' => 'Registration is unavailable after the first administrator has been created.',
-            ], 403);
-        }
-
         $data = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:120'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
@@ -29,12 +23,15 @@ class AuthController extends Controller
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
-            'role' => 'administrator',
+            'role' => 'customer',
         ]);
 
+        $user->sendEmailVerificationNotification();
+
         return response()->json([
-            'token' => $user->createToken('dashboard')->plainTextToken,
-            'user' => $user->only(['id', 'name', 'email', 'role']),
+            'message' => 'We sent a verification link to your email address.',
+            'email' => $user->email,
+            'verification_required' => true,
         ], 201);
     }
 
@@ -44,6 +41,13 @@ class AuthController extends Controller
         $user = User::where('email', $data['email'])->first();
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'The supplied credentials are invalid.'], 422);
+        }
+
+        if ($user->role === 'customer' && ! $user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'Please verify your email address before signing in.',
+                'code' => 'email_verification_required',
+            ], 403);
         }
 
         $user->tokens()->where('name', 'dashboard')->delete();
@@ -64,6 +68,20 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()?->delete();
 
         return response()->noContent();
+    }
+
+    public function resendVerification(Request $request)
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $user = User::where('email', $data['email'])->first();
+
+        if ($user?->role === 'customer' && ! $user->hasVerifiedEmail()) {
+            $user->sendEmailVerificationNotification();
+        }
+
+        return response()->json([
+            'message' => 'If the account is awaiting verification, a new link has been sent.',
+        ], 202);
     }
 
     public function updateProfile(Request $request)
