@@ -13,6 +13,6 @@
 
 - Konfigurasikan SMTP atau transport email yang benar di `backend/.env`; `MAIL_MAILER=log` tidak mengirim tautan verifikasi. Uji pendaftaran menggunakan alamat email nyata sebelum membuka penjualan.
 - Jalankan worker antrean Laravel secara terus-menerus agar akun berbayar benar-benar diprovisioning.
-- Jalankan `php artisan schedule:run` setiap menit. Scheduler menutup invoice belum dibayar yang sudah lewat 3 hari dan menghapus password VPN sementaranya; scheduler yang sama menangani kedaluwarsa layanan.
+- Jalankan `php artisan schedule:run` setiap menit. Contoh cron produksi ada di `deploy/viruzsvpn.cron`. Scheduler menutup invoice belum dibayar yang sudah lewat 3 hari dan menghapus password VPN sementaranya; scheduler yang sama menangani kedaluwarsa layanan.
 - Metode pembayaran saat ini transfer manual. Aplikasi tidak mengklaim transfer berhasil hanya berdasarkan nomor referensi yang dikirim pelanggan.
 - Akun admin yang dibuat langsung melalui menu **VPN accounts** tidak otomatis menjadi milik pelanggan. Alur pelanggan yang tercatat memakai invoice dan pembayaran di menu **Billing & invoice**.
