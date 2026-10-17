@@ -22,6 +22,7 @@ export type Server = {
   status: string; vpn_status: string; is_demo: boolean; tls_verify: boolean; capabilities: { protocols?: string[] }; accounts_count?: number
   last_checked_at?: string; last_latency_ms?: number
 }
+export type ProvisioningOptions = { server_id: number; server_status: string; is_demo: boolean; protocols: string[] }
 export type Plan = { id: number; name: string; description?: string; price_cents: number; currency: string; duration_days: number; allowed_protocols: string[]; allowed_server_ids?: number[]; connection_limit: number; bandwidth_mbps?: number; data_quota_bytes?: number; is_active: boolean }
 export type Account = { id: number; uuid: string; identifier: string; protocol: string; status: string; expires_at?: string; allocated_ip?: string; server: Server; plan?: Plan; device_limit?: number; user_id?: number; l2tp_psk?: string }
 export type CustomerServer = { id: number; name: string; location?: string; protocols: string[] }

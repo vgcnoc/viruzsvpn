@@ -40,14 +40,20 @@ class ProvisionVpnAccount implements ShouldQueue
             $result = $drivers->for($account->server)->createAccount($account->server, $account);
             if (($result['supported'] ?? false) && in_array($result['status'] ?? '', ['success', 'demo'], true)) {
                 $order = VpnOrder::where('vpn_account_id', $account->id)->where('type', 'new')->where('status', 'paid')->first();
-                $startedAt = $order ? now() : $account->starts_at;
-                $expiresAt = $order ? $startedAt->copy()->addDays($order->duration_days) : $account->expires_at;
+                $manualPlan = ! $order && $account->plan_id && $account->subscriptions()->where('status', 'pending_activation')->exists()
+                    ? $account->plan : null;
+                $startedAt = ($order || $manualPlan) ? now() : $account->starts_at;
+                $expiresAt = $order ? $startedAt->copy()->addDays($order->duration_days)
+                    : ($manualPlan ? $startedAt->copy()->addDays($manualPlan->duration_days) : $account->expires_at);
                 $account->update([
                     'status' => 'active', 'remote_reference' => $result['remote_reference'] ?? data_get($result, 'data.remote_reference'),
                     'encrypted_provisioning_secret' => null, 'starts_at' => $startedAt, 'expires_at' => $expiresAt,
                 ]);
                 if ($order) {
                     $account->subscriptions()->where('notes', $order->invoice_number)->where('status', 'pending_activation')
+                        ->update(['status' => 'active', 'starts_at' => $startedAt, 'expires_at' => $expiresAt]);
+                } elseif ($manualPlan) {
+                    $account->subscriptions()->where('status', 'pending_activation')
                         ->update(['status' => 'active', 'starts_at' => $startedAt, 'expires_at' => $expiresAt]);
                 }
                 $log->update(['status' => 'success', 'message' => $result['message'] ?? null, 'details' => $result, 'completed_at' => now()]);

@@ -11,10 +11,9 @@ use App\Models\Subscription;
 use App\Models\VpnAccount;
 use App\Models\VpnOrder;
 use App\Models\VpnServer;
-use App\Services\Servers\MikroTikAdapter;
+use App\Services\Servers\AccountProvisioning;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -23,15 +22,15 @@ class BillingController extends Controller
 {
     private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp'];
 
-    public function catalog(MikroTikAdapter $routerOs)
+    public function catalog(AccountProvisioning $provisioning)
     {
         return response()->json([
             'plans' => Plan::where('is_active', true)->orderBy('price_cents')->get(),
             'servers' => VpnServer::query()->where('status', 'online')->where('is_demo', false)
-                ->where('adapter', 'mikrotik-routeros')->limit(50)->get(['id', 'name', 'location', 'status', 'capabilities', 'encrypted_credentials'])
+                ->where('adapter', 'mikrotik-routeros')->limit(50)->get(['id', 'name', 'location', 'adapter', 'status', 'capabilities', 'encrypted_credentials'])
                 ->map(fn ($server) => [
                     'id' => $server->id, 'name' => $server->name, 'location' => $server->location,
-                    'protocols' => array_values(array_intersect($server->capabilities['protocols'] ?? [], $this->availableProtocols($server, $routerOs))),
+                    'protocols' => array_values(array_intersect($provisioning->availableProtocols($server), self::CUSTOMER_PROTOCOLS)),
                 ])->filter(fn ($server) => count($server['protocols']) > 0)->values(),
         ]);
     }
@@ -83,7 +82,7 @@ class BillingController extends Controller
             });
     }
 
-    public function createOrder(Request $request, MikroTikAdapter $routerOs)
+    public function createOrder(Request $request, AccountProvisioning $provisioning)
     {
         $data = $request->validate([
             'plan_id' => ['required', 'integer', 'exists:plans,id'],
@@ -100,9 +99,10 @@ class BillingController extends Controller
         abort_unless(! $plan->allowed_server_ids || in_array($server->id, $plan->allowed_server_ids, true), 422, 'This server is not available for the plan.');
         abort_unless($server->status === 'online' && ! $server->is_demo && $server->adapter === 'mikrotik-routeros'
             && in_array($data['protocol'], $server->capabilities['protocols'] ?? [], true)
-            && in_array($data['protocol'], $this->availableProtocols($server, $routerOs), true), 422, 'This VPN protocol is not active on the selected server.');
-        abort_if(VpnAccount::where('vpn_server_id', $server->id)->where('protocol', $data['protocol'])->where('identifier', $data['identifier'])->exists(), 422, 'This VPN username is already in use.');
-        abort_if(VpnOrder::where('vpn_server_id', $server->id)->where('protocol', $data['protocol'])->where('identifier', $data['identifier'])
+            && in_array($data['protocol'], $provisioning->availableProtocols($server), true), 422, 'This VPN protocol is not active on the selected server.');
+        abort_if(VpnAccount::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
+            ->whereNotIn('status', ['revoked', 'expired'])->exists(), 422, 'This VPN username is already in use.');
+        abort_if(VpnOrder::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
             ->whereIn('status', ['pending_payment', 'payment_submitted', 'paid'])->exists(), 422, 'This VPN username is already reserved.');
 
         $order = DB::transaction(function () use ($request, $data, $plan, $payment) {
@@ -248,16 +248,4 @@ class BillingController extends Controller
         return $order->fresh()->load('account:id,status,expires_at');
     }
 
-    private function availableProtocols(VpnServer $server, MikroTikAdapter $routerOs): array
-    {
-        $ready = Cache::remember('virvpn:sellable-protocols:'.$server->id, 60, fn () => $routerOs->sellableProtocols($server));
-        $credentials = $server->encrypted_credentials
-            ? json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR)
-            : [];
-        if (empty($credentials['routeros_l2tp_secret'])) {
-            $ready = array_values(array_diff($ready, ['l2tp-ipsec']));
-        }
-
-        return array_values(array_intersect($ready, self::CUSTOMER_PROTOCOLS));
-    }
 }

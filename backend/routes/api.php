@@ -35,6 +35,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/servers/{server}/capabilities', [ServerController::class, 'capabilities']);
     Route::apiResource('plans', PlanController::class);
     Route::get('/accounts/export', [VpnAccountController::class, 'export']);
+    Route::get('/servers/{server}/provisioning-options', [VpnAccountController::class, 'provisioningOptions']);
     Route::apiResource('accounts', VpnAccountController::class);
     Route::post('/accounts/{account}/suspend', [VpnAccountController::class, 'suspend']);
     Route::post('/accounts/{account}/activate', [VpnAccountController::class, 'activate']);

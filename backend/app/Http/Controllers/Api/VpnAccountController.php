@@ -8,7 +8,9 @@ use App\Models\OperationLog;
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\VpnAccount;
+use App\Models\VpnOrder;
 use App\Models\VpnServer;
+use App\Services\Servers\AccountProvisioning;
 use App\Services\Servers\DriverFactory;
 use App\Services\Servers\ProtocolRegistry;
 use Illuminate\Http\Request;
@@ -19,6 +21,16 @@ use Illuminate\Validation\Rule;
 
 class VpnAccountController extends Controller
 {
+    public function provisioningOptions(VpnServer $server, AccountProvisioning $provisioning)
+    {
+        return response()->json([
+            'server_id' => $server->id,
+            'server_status' => $server->status,
+            'is_demo' => $server->is_demo,
+            'protocols' => $provisioning->availableProtocols($server),
+        ]);
+    }
+
     public function index(Request $request)
     {
         return VpnAccount::query()->with(['server:id,name,is_demo', 'plan:id,name'])
@@ -28,7 +40,7 @@ class VpnAccountController extends Controller
             ->latest()->paginate($request->integer('per_page', 20));
     }
 
-    public function store(Request $request)
+    public function store(Request $request, AccountProvisioning $provisioning)
     {
         $key = $request->header('Idempotency-Key');
         if ($key && ($existing = VpnAccount::where('idempotency_key', $key)->first())) {
@@ -47,7 +59,13 @@ class VpnAccountController extends Controller
             'wireguard_public_key' => ['nullable', 'string', 'regex:/^[A-Za-z0-9+\\/]{43}=$/'],
         ]);
         $server = VpnServer::findOrFail($data['vpn_server_id']);
-        abort_unless(in_array($data['protocol'], ProtocolRegistry::supportedBy($server->capabilities ?? []), true), 422, 'The selected server does not support this protocol.');
+        abort_unless(in_array($data['protocol'], $provisioning->availableProtocols($server), true), 422,
+            'This protocol cannot be provisioned on the selected server. Check its connection and active VPN service.');
+        abort_if(VpnAccount::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
+            ->whereNotIn('status', ['revoked', 'expired'])->exists(), 422, 'This VPN username is already in use on this server.');
+        abort_if(VpnOrder::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
+            ->whereIn('status', ['pending_payment', 'payment_submitted', 'paid'])->exists(), 422,
+            'This VPN username is reserved by a customer order.');
         $plan = isset($data['plan_id']) ? Plan::findOrFail($data['plan_id']) : null;
         abort_if($plan && (! $plan->is_active || ! in_array($data['protocol'], $plan->allowed_protocols, true)), 422, 'The selected plan does not support this protocol.');
         abort_if($plan && $plan->allowed_server_ids && ! in_array($server->id, $plan->allowed_server_ids, true), 422, 'The selected plan does not allow this server.');
@@ -76,7 +94,7 @@ class VpnAccountController extends Controller
         unset($data['credentials'], $data['wireguard_public_key']);
         $account = VpnAccount::create($data);
         if ($plan && $account->expires_at) {
-            Subscription::create(['vpn_account_id' => $account->id, 'plan_id' => $plan->id, 'starts_at' => $startsAt, 'expires_at' => $account->expires_at, 'status' => 'active', 'amount_cents' => $plan->price_cents, 'currency' => $plan->currency]);
+            Subscription::create(['vpn_account_id' => $account->id, 'plan_id' => $plan->id, 'starts_at' => $startsAt, 'expires_at' => $account->expires_at, 'status' => 'pending_activation', 'amount_cents' => $plan->price_cents, 'currency' => $plan->currency]);
         }
         ProvisionVpnAccount::dispatch($account->id, $request->user()->id);
 

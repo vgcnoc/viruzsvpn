@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ExpireVpnAccount;
+use App\Jobs\ProvisionVpnAccount;
 use App\Models\Plan;
 use App\Models\User;
 use App\Models\VpnAccount;
@@ -11,7 +12,9 @@ use App\Services\Servers\DriverFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -94,6 +97,61 @@ class VpnPlatformApiTest extends TestCase
         $this->withHeaders($headers)->postJson('/api/accounts', $payload)->assertOk()->assertJsonPath('id', $first->json('id'));
         $this->assertDatabaseCount('vpn_accounts', 1);
         $this->assertDatabaseHas('operation_logs', ['operation' => 'create_account', 'status' => 'success']);
+    }
+
+    public function test_manual_routeros_provisioning_rejects_unsupported_protocols_and_duplicate_names(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $server = VpnServer::create([
+            'name' => 'Ready CHR', 'adapter' => 'mikrotik-routeros', 'hostname' => 'chr.example.test',
+            'port' => 8729, 'status' => 'online', 'capabilities' => ['protocols' => ['wireguard', 'sstp', 'l2tp-ipsec']],
+            'encrypted_credentials' => Crypt::encryptString(json_encode(['routeros_username' => 'api', 'routeros_password' => 'private'], JSON_THROW_ON_ERROR)),
+        ]);
+        Cache::put('virvpn:provisionable-protocols:'.$server->id, ['sstp', 'l2tp-ipsec'], 60);
+
+        $this->getJson('/api/servers/'.$server->id.'/provisioning-options')
+            ->assertOk()->assertJsonPath('protocols', ['sstp']);
+        $this->postJson('/api/accounts', [
+            'vpn_server_id' => $server->id, 'protocol' => 'wireguard', 'identifier' => 'client-one',
+        ])->assertUnprocessable();
+        $this->assertDatabaseCount('vpn_accounts', 0);
+
+        Queue::fake();
+        $payload = [
+            'vpn_server_id' => $server->id, 'protocol' => 'sstp', 'identifier' => 'client-one',
+            'expires_at' => now()->addDays(30)->toISOString(), 'credentials' => ['password' => 'very-secure-password'],
+        ];
+        $this->postJson('/api/accounts', $payload)->assertStatus(202)->assertJsonPath('status', 'pending');
+        Queue::assertPushed(ProvisionVpnAccount::class);
+        $this->assertDatabaseCount('vpn_accounts', 1);
+        $this->postJson('/api/accounts', $payload)->assertUnprocessable();
+    }
+
+    public function test_manual_plan_starts_when_provisioning_succeeds(): void
+    {
+        Queue::fake();
+        Sanctum::actingAs(User::factory()->create());
+        $server = VpnServer::create([
+            'name' => 'Demo edge', 'adapter' => 'demo', 'hostname' => 'demo.invalid', 'port' => 443,
+            'capabilities' => ['protocols' => ['wireguard']], 'is_demo' => true,
+        ]);
+        $plan = Plan::create([
+            'name' => 'Manual 30', 'price_cents' => 50000, 'currency' => 'IDR',
+            'duration_days' => 30, 'allowed_protocols' => ['wireguard'], 'connection_limit' => 1,
+        ]);
+        $accountId = $this->postJson('/api/accounts', [
+            'vpn_server_id' => $server->id, 'plan_id' => $plan->id,
+            'protocol' => 'wireguard', 'identifier' => 'manual-peer',
+        ])->assertStatus(202)->json('id');
+        $account = VpnAccount::findOrFail($accountId);
+        $this->assertSame('pending_activation', $account->subscriptions()->firstOrFail()->status);
+
+        (new ProvisionVpnAccount($accountId))->handle(app(DriverFactory::class));
+
+        $account->refresh();
+        $this->assertSame('active', $account->status);
+        $this->assertSame('active', $account->subscriptions()->firstOrFail()->status);
+        $this->assertSame(30, (int) round($account->starts_at->diffInDays($account->expires_at)));
     }
 
     public function test_non_administrator_cannot_manage_the_control_plane(): void

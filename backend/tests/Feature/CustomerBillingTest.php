@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\VpnAccount;
 use App\Models\VpnServer;
 use App\Services\Servers\DriverFactory;
+use App\Services\Servers\AccountProvisioning;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Cache;
@@ -28,7 +29,7 @@ class CustomerBillingTest extends TestCase
             'port' => 8729, 'status' => 'online', 'capabilities' => ['protocols' => ['l2tp-ipsec', 'sstp']],
             'encrypted_credentials' => Crypt::encryptString(json_encode(['routeros_l2tp_secret' => 'server-pre-shared-key-123'])),
         ]);
-        Cache::put('virvpn:sellable-protocols:'.$server->id, ['l2tp-ipsec'], 60);
+        Cache::put('virvpn:provisionable-protocols:'.$server->id, ['l2tp-ipsec'], 60);
         $plan = Plan::create([
             'name' => 'Basic 30', 'price_cents' => 45000, 'currency' => 'IDR', 'duration_days' => 30,
             'allowed_protocols' => ['l2tp-ipsec'], 'connection_limit' => 1, 'is_active' => true,
@@ -45,6 +46,7 @@ class CustomerBillingTest extends TestCase
     {
         Queue::fake();
         [$admin, $customer, $server, $plan] = $this->fixture();
+        $this->assertSame(['l2tp-ipsec'], app(AccountProvisioning::class)->availableProtocols($server));
         Sanctum::actingAs($customer);
         $this->getJson('/api/customer/catalog')->assertOk()->assertJsonCount(1, 'plans')->assertJsonCount(1, 'servers');
         $response = $this->postJson('/api/customer/orders', [
