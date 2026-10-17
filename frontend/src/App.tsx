@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Cable, ChevronRight, CircleDollarSign, Copy, Gauge, LayoutDashboard, LoaderCircle, LogOut, Menu, Pencil, Plus, Radio, Search, ServerCog, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react'
+import { Activity, Cable, ChevronRight, CircleDollarSign, Copy, Gauge, LayoutDashboard, LoaderCircle, LogOut, Menu, Pencil, Plus, Radio, Search, ServerCog, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
@@ -14,6 +14,7 @@ const nav = [
   { to: '/servers', label: 'Servers', icon: ServerCog },
   { to: '/accounts', label: 'VPN accounts', icon: UsersRound },
   { to: '/plans', label: 'Plans & billing', icon: CircleDollarSign },
+  { to: '/settings', label: 'Settings', icon: Settings2 },
 ]
 
 type DashboardData = { summary: { servers: number; servers_online: number; accounts_active: number; accounts_expiring_soon: number }; recent_operations: Array<{ id: number; operation: string; status: string; created_at: string; server?: { name: string } }>; demo_data: boolean }
@@ -35,7 +36,7 @@ function App() {
     <main>
       <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle navigation"><Menu size={20} /></button><div className="crumb"><span>Control plane</span><ChevronRight size={14} /><b>Network operations</b></div><div className="topbar-actions"><span className="connection"><i /> API connected</span><button className="avatar" title="Administrator">A</button><button className="icon-button" aria-label="Sign out" onClick={() => { localStorage.removeItem('vpn-platform-token'); setToken(null) }}><LogOut size={18} /></button></div></header>
       <section className="content"><Routes>
-        <Route path="/" element={<Overview />} /><Route path="/servers" element={<Servers />} /><Route path="/accounts" element={<Accounts />} /><Route path="/plans" element={<Plans />} /><Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<Overview />} /><Route path="/servers" element={<Servers />} /><Route path="/accounts" element={<Accounts />} /><Route path="/plans" element={<Plans />} /><Route path="/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/" replace />} />
       </Routes></section>
     </main>
   </div>
@@ -61,6 +62,13 @@ function Overview() {
     <div className="metric-grid"><Metric icon={<ServerCog />} label="Registered servers" value={data?.summary.servers} detail={`${data?.summary.servers_online ?? 0} online`} loading={query.isLoading} /><Metric icon={<UsersRound />} label="Active VPN accounts" value={data?.summary.accounts_active} detail="Provisioned and available" loading={query.isLoading} /><Metric icon={<Gauge />} label="Expiring within 7 days" value={data?.summary.accounts_expiring_soon} detail="Requires renewal review" loading={query.isLoading} /><Metric icon={<ShieldCheck />} label="Control plane" value="Protected" detail="Token authentication enabled" loading={false} /></div>
     <div className="two-column"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">ACTIVITY</p><h2>Latest operations</h2></div><Activity size={20} /></div>{query.isLoading ? <Skeleton rows={4} /> : data?.recent_operations.length ? <div className="activity-list">{data.recent_operations.map((item) => <div className="activity" key={item.id}><span className="activity-icon"><Radio size={15} /></span><div><b>{item.operation.replaceAll('_', ' ')}</b><p>{item.server?.name ?? 'Control plane'} · {new Date(item.created_at).toLocaleString('id-ID')}</p></div><span className={statusClass(item.status)}>{item.status}</span></div>)}</div> : <Empty icon={<Activity />} title="No recorded operations" description="Server checks and account actions will be logged here." />}</section>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">SAFETY POSTURE</p><h2>Production readiness</h2></div><ShieldCheck size={20} /></div><div className="readiness"><Readiness label="Secret encryption at rest" value="Configured" positive /><Readiness label="Linux agent protocol" value="HTTPS + HMAC" positive /><Readiness label="RouterOS driver" value="API/API-SSL ready" positive /><Readiness label="Live server metrics" value="Awaiting test" /></div><p className="panel-footnote">No connectivity status is invented. Add a server and run a connection test to create a verified result.</p></section></div>
+  </>
+}
+
+function Settings() {
+  return <><PageTitle eyebrow="CONTROL PLANE" title="Settings" description="Review the local control-plane configuration and the operational safeguards used by VPNOPS." />
+    <div className="two-column"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">CONNECTIVITY</p><h2>Application endpoint</h2></div><Cable size={20} /></div><div className="readiness"><Readiness label="API endpoint" value={String(api.defaults.baseURL ?? 'http://127.0.0.1:8000/api')} positive /><Readiness label="Authentication" value="Sanctum bearer token" positive /><Readiness label="Session storage" value="This browser only" positive /></div><p className="panel-footnote">Change deployment endpoints and secrets through the server environment, never through a browser form.</p></section>
+      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">ROUTEROS</p><h2>Registration checklist</h2></div><ShieldCheck size={20} /></div><div className="readiness"><Readiness label="API service" value="API-SSL preferred" positive /><Readiness label="Allowed CIDR" value="VPNOPS source IP only" positive /><Readiness label="Certificate" value="Required for verified TLS" /></div><p className="panel-footnote">Use the server’s public address as the endpoint. The allowed CIDR must be the source address of the machine running VPNOPS—not the RouterOS address.</p></section></div>
   </>
 }
 
