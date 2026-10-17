@@ -27,3 +27,28 @@
   border-color: #44c9c5;
   box-shadow: 0 0 0 3px rgba(55, 203, 198, .12);
 }
+
+.settings-panels {
+  margin-bottom: 16px;
+}
+
+.panel-form {
+  padding: 18px 20px 20px;
+}
+
+.account-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 11px;
+  color: #8fa1b4;
+  background: #0a1522;
+  border: 1px solid #263b50;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.account-role b {
+  color: #57d8ae;
+  text-transform: capitalize;
+}

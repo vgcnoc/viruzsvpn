@@ -25,6 +25,29 @@ class VpnPlatformApiTest extends TestCase
         $this->withToken($login->json('token'))->getJson('/api/dashboard')->assertOk()->assertJsonStructure(['summary', 'recent_operations', 'demo_data']);
     }
 
+    public function test_administrator_can_update_profile_and_password(): void
+    {
+        $user = User::factory()->create(['email' => 'admin@example.test', 'password' => 'current-password']);
+        $login = $this->postJson('/api/auth/login', ['email' => $user->email, 'password' => 'current-password']);
+        $token = $login->json('token');
+        $otherToken = $user->createToken('another-device')->accessToken;
+
+        $this->withToken($token)->patchJson('/api/auth/profile', [
+            'name' => 'VPN Administrator',
+            'email' => 'operator@example.test',
+        ])->assertOk()->assertJsonPath('name', 'VPN Administrator')->assertJsonPath('email', 'operator@example.test');
+
+        $this->withToken($token)->postJson('/api/auth/password', [
+            'current_password' => 'current-password',
+            'password' => 'a-new-secure-password',
+            'password_confirmation' => 'a-new-secure-password',
+        ])->assertOk()->assertJsonPath('message', 'Password updated. Other active sessions have been signed out.');
+
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $otherToken->id]);
+        $this->postJson('/api/auth/login', ['email' => 'operator@example.test', 'password' => 'current-password'])->assertUnprocessable();
+        $this->postJson('/api/auth/login', ['email' => 'operator@example.test', 'password' => 'a-new-secure-password'])->assertOk();
+    }
+
     public function test_account_provisioning_uses_the_server_driver_and_is_idempotent(): void
     {
         $admin = User::factory()->create();

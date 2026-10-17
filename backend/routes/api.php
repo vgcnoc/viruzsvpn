@@ -12,6 +12,8 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
+    Route::post('/auth/password', [AuthController::class, 'updatePassword']);
     Route::get('/dashboard', DashboardController::class);
     Route::apiResource('servers', ServerController::class);
     Route::post('/servers/{server}/test', [ServerController::class, 'test']);

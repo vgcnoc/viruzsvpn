@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Cable, ChevronRight, CircleDollarSign, Copy, Gauge, LayoutDashboard, LoaderCircle, LogOut, Menu, Pencil, Plus, Radio, Search, ServerCog, Settings2, ShieldCheck, Trash2, UsersRound, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { z } from 'zod'
@@ -18,6 +18,7 @@ const nav = [
 ]
 
 type DashboardData = { summary: { servers: number; servers_online: number; accounts_active: number; accounts_expiring_soon: number }; recent_operations: Array<{ id: number; operation: string; status: string; created_at: string; server?: { name: string } }>; demo_data: boolean }
+type AuthUser = { id: number; name: string; email: string; role: string }
 const money = (amount: number, currency: string) => new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
 const date = (value?: string) => value ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(value)) : '—'
 const statusClass = (status: string) => `status ${['online', 'active', 'healthy', 'success'].includes(status) ? 'good' : ['offline', 'failed', 'revoked'].includes(status) ? 'bad' : status === 'demo' ? 'demo' : 'warn'}`
@@ -65,9 +66,24 @@ function Overview() {
   </>
 }
 
+const profileSchema = z.object({ name: z.string().trim().min(2, 'Enter at least 2 characters.').max(120), email: z.string().trim().email('Enter a valid email address.') })
+const passwordSchema = z.object({ current_password: z.string().min(1, 'Enter your current password.'), password: z.string().min(12, 'Use at least 12 characters.'), password_confirmation: z.string().min(1, 'Confirm the new password.') }).refine((values) => values.password === values.password_confirmation, { path: ['password_confirmation'], message: 'Passwords do not match.' })
+type ProfileValues = z.infer<typeof profileSchema>
+type PasswordValues = z.infer<typeof passwordSchema>
+
 function Settings() {
-  return <><PageTitle eyebrow="CONTROL PLANE" title="Settings" description="Review the local control-plane configuration and the operational safeguards used by VPNOPS." />
-    <div className="two-column"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">CONNECTIVITY</p><h2>Application endpoint</h2></div><Cable size={20} /></div><div className="readiness"><Readiness label="API endpoint" value={String(api.defaults.baseURL ?? 'http://127.0.0.1:8000/api')} positive /><Readiness label="Authentication" value="Sanctum bearer token" positive /><Readiness label="Session storage" value="This browser only" positive /></div><p className="panel-footnote">Change deployment endpoints and secrets through the server environment, never through a browser form.</p></section>
+  const client = useQueryClient(); const [message, setMessage] = useState('')
+  const profile = useQuery({ queryKey: ['auth-me'], queryFn: () => api.get<AuthUser>('/auth/me').then((r) => r.data) })
+  const { register: registerProfile, handleSubmit: submitProfile, reset: resetProfile, formState: { errors: profileErrors } } = useForm<ProfileValues>({ resolver: zodResolver(profileSchema), defaultValues: { name: '', email: '' } })
+  const { register: registerPassword, handleSubmit: submitPassword, reset: resetPassword, formState: { errors: passwordErrors } } = useForm<PasswordValues>({ resolver: zodResolver(passwordSchema), defaultValues: { current_password: '', password: '', password_confirmation: '' } })
+  useEffect(() => { if (profile.data) resetProfile({ name: profile.data.name, email: profile.data.email }) }, [profile.data, resetProfile])
+  const saveProfile = useMutation({ mutationFn: (values: ProfileValues) => api.patch<AuthUser>('/auth/profile', values).then((r) => r.data), onSuccess: (user) => { client.setQueryData(['auth-me'], user); resetProfile({ name: user.name, email: user.email }); setMessage('Profile updated.') } })
+  const changePassword = useMutation({ mutationFn: (values: PasswordValues) => api.post<{ message: string }>('/auth/password', values).then((r) => r.data), onSuccess: (data) => { resetPassword(); setMessage(data.message) } })
+  return <><PageTitle eyebrow="CONTROL PLANE" title="Settings" description="Manage your administrator profile, credentials, and operational safeguards." />
+    {message && <div className="notice"><ShieldCheck size={16} />{message}</div>}
+    <div className="two-column settings-panels"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">ACCOUNT</p><h2>Edit profile</h2></div><Pencil size={20} /></div>{profile.isLoading ? <Skeleton rows={3} /> : <form className="form-grid panel-form" onSubmit={submitProfile((values) => saveProfile.mutate(values))}><label className="span-2">Full name<input autoComplete="name" {...registerProfile('name')} />{profileErrors.name && <small className="field-error">{profileErrors.name.message}</small>}</label><label className="span-2">Email address<input autoComplete="email" {...registerProfile('email')} />{profileErrors.email && <small className="field-error">{profileErrors.email.message}</small>}</label><div className="account-role span-2"><span>Role</span><b>{profile.data?.role ?? 'administrator'}</b></div>{saveProfile.isError && <p className="form-error span-2">{apiError(saveProfile.error)}</p>}<div className="modal-actions span-2"><button className="button primary" disabled={saveProfile.isPending}>{saveProfile.isPending && <LoaderCircle className="spin" size={16} />}Save profile</button></div></form>}<p className="panel-footnote">Changes apply to the administrator account currently signed in.</p></section>
+      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">SECURITY</p><h2>Change password</h2></div><ShieldCheck size={20} /></div><form className="form-grid panel-form" onSubmit={submitPassword((values) => changePassword.mutate(values))}><label className="span-2">Current password<input type="password" autoComplete="current-password" {...registerPassword('current_password')} />{passwordErrors.current_password && <small className="field-error">{passwordErrors.current_password.message}</small>}</label><label>New password<input type="password" autoComplete="new-password" {...registerPassword('password')} />{passwordErrors.password && <small className="field-error">{passwordErrors.password.message}</small>}</label><label>Confirm password<input type="password" autoComplete="new-password" {...registerPassword('password_confirmation')} />{passwordErrors.password_confirmation && <small className="field-error">{passwordErrors.password_confirmation.message}</small>}</label>{changePassword.isError && <p className="form-error span-2">{apiError(changePassword.error)}</p>}<div className="modal-actions span-2"><button className="button primary" disabled={changePassword.isPending}>{changePassword.isPending && <LoaderCircle className="spin" size={16} />}Update password</button></div></form><p className="panel-footnote">Use at least 12 characters. Other active browser sessions will be signed out.</p></section></div>
+    <div className="two-column settings-panels"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">CONNECTIVITY</p><h2>Application endpoint</h2></div><Cable size={20} /></div><div className="readiness"><Readiness label="API endpoint" value={String(api.defaults.baseURL ?? 'http://127.0.0.1:8000/api')} positive /><Readiness label="Authentication" value="Sanctum bearer token" positive /><Readiness label="Session storage" value="This browser only" positive /></div><p className="panel-footnote">Change deployment endpoints and secrets through the server environment, never through a browser form.</p></section>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">ROUTEROS</p><h2>Registration checklist</h2></div><ShieldCheck size={20} /></div><div className="readiness"><Readiness label="API service" value="API-SSL preferred" positive /><Readiness label="Allowed CIDR" value="VPNOPS source IP only" positive /><Readiness label="Certificate" value="Required for verified TLS" /></div><p className="panel-footnote">Use the server’s public address as the endpoint. The allowed CIDR must be the source address of the machine running VPNOPS—not the RouterOS address.</p></section></div>
   </>
 }

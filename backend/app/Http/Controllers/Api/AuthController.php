@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -35,5 +37,46 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()?->delete();
 
         return response()->noContent();
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+        ]);
+
+        $user->fill($data)->save();
+
+        return response()->json($user->only(['id', 'name', 'email', 'role']));
+    }
+
+    public function updatePassword(Request $request)
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:12', 'confirmed'],
+        ]);
+
+        $user = $request->user();
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['The current password is incorrect.'],
+            ]);
+        }
+
+        $user->forceFill(['password' => Hash::make($data['password'])])->save();
+
+        $currentToken = $user->currentAccessToken();
+        if ($currentToken) {
+            $user->tokens()->whereKeyNot($currentToken->id)->delete();
+        } else {
+            $user->tokens()->delete();
+        }
+
+        return response()->json([
+            'message' => 'Password updated. Other active sessions have been signed out.',
+        ]);
     }
 }
