@@ -308,7 +308,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
       port: server?.port ?? 443, location: server?.location, protocols: server?.capabilities.protocols?.join(',') ?? 'wireguard',
       username: '', secret: '', routeros_api_ssl: true, routeros_allowed_cidr: '', routeros_certificate: '',
       routeros_ppp_profile: 'virvpn-standard', routeros_vpn_subnet: '10.250.20.0/24', routeros_vpn_gateway: '10.250.20.1',
-      routeros_vpn_pool: '10.250.20.10-10.250.20.254', routeros_wan_interface: 'ether1', routeros_l2tp_secret: '',
+      routeros_vpn_pool: '10.250.20.10-10.250.20.254', routeros_wan_interface: '', routeros_l2tp_secret: '',
       tls_verify: server?.tls_verify ?? true,
     },
   })
@@ -383,7 +383,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
           <div><p className="eyebrow">PASTE-READY VPN SETUP</p><h3>Dedicated virVPN service profile</h3><p>These values build an idempotent script. It creates only named virVPN objects and leaves existing active service settings untouched.</p></div>
           <div className="routeros-setup-grid">
             <label>PPP profile<input {...register('routeros_ppp_profile')} /><small>Assigned to new virVPN PPP accounts.</small></label>
-            <label>WAN interface<input {...register('routeros_wan_interface')} /><small>Usually ether1; used for NAT.</small></label>
+            <label>WAN interface<input {...register('routeros_wan_interface')} placeholder="ether1" /><small>Internet uplink used for NAT; do not use a LAN interface.</small></label>
             <label>VPN client subnet<input {...register('routeros_vpn_subnet')} /></label>
             <label>VPN gateway<input {...register('routeros_vpn_gateway')} /></label>
             <label className="span-2">VPN client pool<input {...register('routeros_vpn_pool')} /></label>
