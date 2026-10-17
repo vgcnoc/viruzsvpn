@@ -96,27 +96,28 @@ class ServerController extends Controller
             'credentials.routeros_api_ssl' => ['nullable', 'boolean'],
             'credentials.routeros_allowed_cidr' => ['nullable', 'string', 'max:18', 'regex:/^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\/(?:[0-9]|[12][0-9]|3[0-2])$/'],
             'credentials.routeros_certificate' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
+            'credentials.routeros_ppp_profile' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
         ];
         $data = $request->validate($rules);
         $adapter = $data['adapter'] ?? $server?->adapter;
         $requiresNewCredentials = ! $updating || ($server && array_key_exists('adapter', $data) && $adapter !== $server->adapter);
         $updatesRouterOsCredentials = $adapter === 'mikrotik-routeros' && array_key_exists('credentials', $data);
-        $requiresRouterOsBootstrap = $requiresNewCredentials || $updatesRouterOsCredentials;
         $existingCredentials = $server?->encrypted_credentials
             ? json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR)
             : [];
-        $effectiveCredentials = $data['credentials'] ?? $existingCredentials;
+        $effectiveCredentials = array_replace($existingCredentials, $data['credentials'] ?? []);
+        $requiresRouterOsBootstrap = $requiresNewCredentials || ($updatesRouterOsCredentials && empty($existingCredentials));
         if ($requiresNewCredentials && $adapter === 'linux-agent' && empty($data['credentials']['agent_shared_secret'])) {
             throw ValidationException::withMessages(['credentials.agent_shared_secret' => 'A Linux agent shared secret is required.']);
         }
-        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && (empty($data['credentials']['routeros_username']) || empty($data['credentials']['routeros_password']))) {
+        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && (empty($effectiveCredentials['routeros_username']) || empty($effectiveCredentials['routeros_password']))) {
             throw ValidationException::withMessages(['credentials.routeros_username' => 'RouterOS API username and password are required.']);
         }
-        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && empty($data['credentials']['routeros_allowed_cidr'])) {
+        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && empty($effectiveCredentials['routeros_allowed_cidr'])) {
             throw ValidationException::withMessages(['credentials.routeros_allowed_cidr' => 'A single IPv4 CIDR allowed to reach the RouterOS API is required.']);
         }
         if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros') {
-            $allowedAddress = explode('/', (string) $data['credentials']['routeros_allowed_cidr'])[0];
+            $allowedAddress = explode('/', (string) $effectiveCredentials['routeros_allowed_cidr'])[0];
             $hostname = $data['hostname'] ?? $server?->hostname;
             $serverAddresses = filter_var($hostname, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
                 ? [$hostname]
@@ -126,14 +127,14 @@ class ServerController extends Controller
                 throw ValidationException::withMessages(['credentials.routeros_allowed_cidr' => 'This is the RouterOS server address. Enter the public IP of the machine running VPNOPS instead.']);
             }
         }
-        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && ($data['credentials']['routeros_api_ssl'] ?? true) && empty($data['credentials']['routeros_certificate'])) {
+        if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && ($effectiveCredentials['routeros_api_ssl'] ?? true) && empty($effectiveCredentials['routeros_certificate'])) {
             throw ValidationException::withMessages(['credentials.routeros_certificate' => 'The RouterOS certificate name is required when API-SSL is enabled.']);
         }
         if ($adapter === 'mikrotik-routeros' && ! ($effectiveCredentials['routeros_api_ssl'] ?? true) && ($data['tls_verify'] ?? $server?->tls_verify ?? true)) {
             throw ValidationException::withMessages(['tls_verify' => 'Disable TLS verification only when deliberately using plain RouterOS API on a trusted private network.']);
         }
         if (array_key_exists('credentials', $data)) {
-            $data['encrypted_credentials'] = Crypt::encryptString(json_encode($data['credentials'], JSON_THROW_ON_ERROR));
+            $data['encrypted_credentials'] = Crypt::encryptString(json_encode($effectiveCredentials, JSON_THROW_ON_ERROR));
             unset($data['credentials']);
         }
 

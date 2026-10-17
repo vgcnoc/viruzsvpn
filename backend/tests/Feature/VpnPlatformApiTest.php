@@ -139,6 +139,19 @@ class VpnPlatformApiTest extends TestCase
         $server = VpnServer::query()->sole();
         $this->assertNotSame('safe-api-password', $server->encrypted_credentials);
         $this->assertSame($payload['credentials'], json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR));
+
+        $this->putJson('/api/servers/'.$server->id, [
+            'name' => $server->name,
+            'adapter' => 'mikrotik-routeros',
+            'hostname' => $server->hostname,
+            'port' => $server->port,
+            'capabilities' => ['protocols' => ['l2tp-ipsec', 'sstp']],
+            'credentials' => ['routeros_ppp_profile' => 'virvpn-standard'],
+        ])->assertOk();
+
+        $storedCredentials = json_decode(Crypt::decryptString($server->fresh()->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('safe-api-password', $storedCredentials['routeros_password']);
+        $this->assertSame('virvpn-standard', $storedCredentials['routeros_ppp_profile']);
     }
 
     public function test_expiry_revokes_a_demo_account_before_marking_it_expired(): void

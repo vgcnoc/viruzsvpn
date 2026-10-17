@@ -153,30 +153,31 @@ function Servers() {
 }
 
 const ipv4Cidr = /^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/
-const routerOsCertificateName = /^[A-Za-z0-9._-]{1,64}$/
-const serverSchema = z.object({ name: z.string().min(3), adapter: z.enum(['linux-agent', 'mikrotik-routeros', 'demo']), hostname: z.string().min(1), port: z.coerce.number().int().min(1).max(65535), location: z.string().optional(), protocols: z.string().min(1), username: z.string().optional(), secret: z.string().optional(), routeros_api_ssl: z.boolean(), routeros_allowed_cidr: z.string().optional().refine((value) => !value || ipv4Cidr.test(value), 'Use one IPv4 CIDR, for example 203.0.113.10/32.'), routeros_certificate: z.string().optional().refine((value) => !value || routerOsCertificateName.test(value), 'Use a RouterOS certificate name (letters, numbers, dot, dash, underscore).'), tls_verify: z.boolean() })
+const routerOsObjectName = /^[A-Za-z0-9._-]{1,64}$/
+const serverSchema = z.object({ name: z.string().min(3), adapter: z.enum(['linux-agent', 'mikrotik-routeros', 'demo']), hostname: z.string().min(1), port: z.coerce.number().int().min(1).max(65535), location: z.string().optional(), protocols: z.string().min(1), username: z.string().optional(), secret: z.string().optional(), routeros_api_ssl: z.boolean(), routeros_allowed_cidr: z.string().optional().refine((value) => !value || ipv4Cidr.test(value), 'Use one IPv4 CIDR, for example 203.0.113.10/32.'), routeros_certificate: z.string().optional().refine((value) => !value || routerOsObjectName.test(value), 'Use a RouterOS certificate name (letters, numbers, dot, dash, underscore).'), routeros_ppp_profile: z.string().min(1).max(64).refine((value) => routerOsObjectName.test(value), 'Use a RouterOS object name.'), routeros_vpn_subnet: z.string().refine((value) => ipv4Cidr.test(value), 'Use an IPv4 subnet, for example 10.250.20.0/24.'), routeros_vpn_gateway: z.string().ip({ version: 'v4' }), routeros_vpn_pool: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}-(?:\d{1,3}\.){3}\d{1,3}$/, 'Use an IP range, for example 10.250.20.10-10.250.20.254.'), routeros_wan_interface: z.string().min(1).max(64).refine((value) => routerOsObjectName.test(value), 'Use a RouterOS interface name.'), routeros_l2tp_secret: z.string().optional(), tls_verify: z.boolean() })
 type ServerValues = z.infer<typeof serverSchema>
 
 const routerOsQuote = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/[\r\n]/g, '')}"`
 function buildRouterOsBootstrap(value: ServerValues) {
   const apiService = value.routeros_api_ssl ? 'api-ssl' : 'api'
-  const certificateCheck = value.routeros_api_ssl ? `:put "virVPN: checking API-SSL certificate..."
+  const protocols = value.protocols.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
+  const has = (protocol: string) => protocols.includes(protocol)
+  const usesCertificate = value.routeros_api_ssl || has('sstp') || has('openvpn')
+  const prefix = value.routeros_vpn_subnet.split('/')[1] ?? '24'
+  const apiCredentialsPresent = Boolean(value.username?.trim() && value.secret)
+  const certificateCheck = usesCertificate ? `:put "virVPN: checking certificate..."
 /certificate
 :if ([:len [find where name=$certificateName]] = 0) do={
     :put ("virVPN ERROR: certificate " . $certificateName . " was not found. No configuration was changed.")
-    :error ("virVPN: create or import the certificate before enabling API-SSL.")
+    :error ("virVPN: create or import the certificate before running this script.")
 }
 ` : ''
   const certificateSetting = value.routeros_api_ssl ? ' certificate=$certificateName' : ''
-  return `# virVPN RouterOS bootstrap — paste from a trusted terminal session.
-# This creates or updates only the dedicated virVPN API user and API service.
-# It does not alter VPN profiles or firewall rules.
-:local vpnopsUser ${routerOsQuote(value.username?.trim() ?? '')}
-:local vpnopsPassword ${routerOsQuote(value.secret ?? '')}
-:local controlPlaneCidr ${routerOsQuote(value.routeros_allowed_cidr ?? '')}
-${value.routeros_api_ssl ? `:local certificateName ${routerOsQuote(value.routeros_certificate ?? '')}
-` : ''}
-${certificateCheck}/user group
+  const allowInput = (protocol: 'tcp' | 'udp' | 'ipsec-esp', port: number | null, label: string) => `/ip firewall filter
+:if ([:len [find where comment="virVPN allow ${label}"]] = 0) do={
+    add chain=input action=accept protocol=${protocol}${port ? ` dst-port=${port}` : ''} comment="virVPN allow ${label}" place-before=0
+}`
+  const apiSection = apiCredentialsPresent ? `/user group
 :if ([:len [find where name="vpnops-api"]] = 0) do={
     add name="vpnops-api" policy=read,write,api
 } else={
@@ -192,27 +193,211 @@ ${certificateCheck}/user group
 
 /ip service
 set ${apiService} disabled=no port=${value.port} address=$controlPlaneCidr${certificateSetting}
-:put "virVPN OK: ${apiService} is enabled on TCP ${value.port}."
+:put "virVPN OK: ${apiService} is enabled on TCP ${value.port}."` : `# API credentials were not entered, so the existing virVPN API user and API service are unchanged.
+# This is expected when generating a service script from Edit server.`
+  const profileSection = `/ip pool
+:if ([:len [find where name=$vpnPool]] = 0) do={
+    add name=$vpnPool ranges=$vpnRange comment="virVPN client addresses"
+} else={
+    :put "virVPN: IP pool already exists; it was left unchanged."
+}
 
-# If this router has an input firewall with a final drop rule, allow TCP ${value.port}
-# only from ${value.routeros_allowed_cidr} before that drop rule. Do not expose this API publicly.`
+/ppp profile
+:if ([:len [find where name=$vpnProfile]] = 0) do={
+    add name=$vpnProfile local-address=$vpnGateway remote-address=$vpnPool dns-server=1.1.1.1,1.0.0.1 use-encryption=required change-tcp-mss=default comment="virVPN managed PPP profile"
+} else={
+    :put "virVPN: PPP profile already exists; it was left unchanged."
+}
+
+/ip firewall nat
+:if ([:len [find where comment="virVPN NAT"]] = 0) do={
+    add chain=srcnat action=masquerade src-address=$vpnSubnet out-interface=$wanInterface comment="virVPN NAT"
+}
+
+/ip firewall filter
+:if ([:len [find where comment="virVPN forward outbound"]] = 0) do={
+    add chain=forward action=accept src-address=$vpnSubnet out-interface=$wanInterface comment="virVPN forward outbound" place-before=0
+}
+:if ([:len [find where comment="virVPN forward return"]] = 0) do={
+    add chain=forward action=accept dst-address=$vpnSubnet connection-state=established,related comment="virVPN forward return" place-before=0
+}`
+  const wireGuardSection = has('wireguard') ? `
+
+/interface wireguard
+:if ([:len [find where name="virvpn-wg"]] = 0) do={
+    add name="virvpn-wg" listen-port=51820 mtu=1420 comment="virVPN managed WireGuard"
+}
+/ip address
+:if ([:len [find where interface="virvpn-wg" and address=$vpnGatewayWithPrefix]] = 0) do={
+    add address=$vpnGatewayWithPrefix interface="virvpn-wg" comment="virVPN WireGuard gateway"
+}
+${allowInput('udp', 51820, 'WireGuard')}` : ''
+  const sstpSection = has('sstp') ? `
+
+${allowInput('tcp', 443, 'SSTP')}
+/interface sstp-server server
+:if ([get [find] disabled] = true) do={
+    set enabled=yes port=443 certificate=$certificateName default-profile=$vpnProfile authentication=mschap2 pfs=yes
+} else={
+    :put "virVPN: SSTP is already active; its global settings were left unchanged."
+}` : ''
+  const l2tpSection = has('l2tp-ipsec') ? `
+
+${allowInput('udp', 1701, 'L2TP')}
+${allowInput('udp', 500, 'IPsec IKE')}
+${allowInput('udp', 4500, 'IPsec NAT-T')}
+${allowInput('ipsec-esp', null, 'IPsec ESP')}
+/interface l2tp-server server
+:if ([get [find] disabled] = true) do={
+    set enabled=yes use-ipsec=required ipsec-secret=$l2tpSecret default-profile=$vpnProfile authentication=mschap2
+} else={
+    :put "virVPN: L2TP is already active; its global settings were left unchanged."
+}` : ''
+  const openVpnSection = has('openvpn') ? `
+
+${allowInput('tcp', 1194, 'OpenVPN')}
+/interface ovpn-server server
+:if ([get [find] disabled] = true) do={
+    set enabled=yes port=1194 mode=ip certificate=$certificateName default-profile=$vpnProfile require-client-certificate=no
+} else={
+    :put "virVPN: OpenVPN is already active; its global settings were left unchanged."
+}` : ''
+  const pptpSection = has('pptp') ? `
+
+${allowInput('tcp', 1723, 'PPTP')}
+/interface pptp-server server
+:if ([get [find] disabled] = true) do={
+    set enabled=yes default-profile=$vpnProfile authentication=mschap2
+} else={
+    :put "virVPN: PPTP is already active; its global settings were left unchanged."
+}` : ''
+  return `# virVPN RouterOS deployment script — paste only into the intended CHR.
+# Selected protocols: ${protocols.join(', ') || 'none'}
+# Safe by design: it creates only virVPN-named objects and does not reset existing customers.
+# Existing enabled SSTP/L2TP/OpenVPN/PPTP service settings are deliberately not overwritten.
+:local vpnopsUser ${routerOsQuote(value.username?.trim() ?? '')}
+:local vpnopsPassword ${routerOsQuote(value.secret ?? '')}
+:local controlPlaneCidr ${routerOsQuote(value.routeros_allowed_cidr ?? '')}
+:local vpnProfile ${routerOsQuote(value.routeros_ppp_profile)}
+:local vpnPool "virvpn-pool"
+:local vpnSubnet ${routerOsQuote(value.routeros_vpn_subnet)}
+:local vpnGateway ${routerOsQuote(value.routeros_vpn_gateway)}
+:local vpnGatewayWithPrefix ${routerOsQuote(`${value.routeros_vpn_gateway}/${prefix}`)}
+:local vpnRange ${routerOsQuote(value.routeros_vpn_pool)}
+:local wanInterface ${routerOsQuote(value.routeros_wan_interface)}
+${usesCertificate ? `:local certificateName ${routerOsQuote(value.routeros_certificate ?? '')}
+` : ''}${has('l2tp-ipsec') ? `:local l2tpSecret ${routerOsQuote(value.routeros_l2tp_secret ?? '')}
+` : ''}
+${certificateCheck}
+${apiSection}
+
+${profileSection}${wireGuardSection}${sstpSection}${l2tpSection}${openVpnSection}${pptpSection}
+
+:put "virVPN OK: selected VPN services and the dedicated PPP profile are ready."
+# WireGuard creates only the server interface here. Add client peers separately before issuing WireGuard configs.
+# OpenVPN clients also require their own client configuration/certificates.`
 }
 
 function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess: () => void; server?: Server }) {
-  const [bootstrapScript, setBootstrapScript] = useState<string | null>(null); const [copyMessage, setCopyMessage] = useState('')
-  const { register, handleSubmit, watch, setError, formState: { errors } } = useForm<ServerValues>({ resolver: zodResolver(serverSchema), defaultValues: { name: server?.name, adapter: (server?.adapter as ServerValues['adapter']) ?? 'linux-agent', hostname: server?.hostname, port: server?.port ?? 443, location: server?.location, protocols: server?.capabilities.protocols?.join(',') ?? 'wireguard', username: '', secret: '', routeros_api_ssl: true, routeros_allowed_cidr: '', routeros_certificate: '', tls_verify: server?.tls_verify ?? true } })
-  const adapter = watch('adapter'); const routerosApiSsl = watch('routeros_api_ssl'); const secret = watch('secret')
-  const requiresRouterOsBootstrap = adapter === 'mikrotik-routeros' && (!server || server.adapter !== 'mikrotik-routeros' || Boolean(secret))
-  const save = useMutation({ mutationFn: (value: ServerValues) => { const credentials = value.secret ? value.adapter === 'linux-agent' ? { agent_shared_secret: value.secret } : value.adapter === 'mikrotik-routeros' ? { routeros_username: value.username, routeros_password: value.secret, routeros_api_ssl: value.routeros_api_ssl, routeros_allowed_cidr: value.routeros_allowed_cidr, routeros_certificate: value.routeros_certificate } : undefined : undefined; const payload = { name: value.name, adapter: value.adapter, hostname: value.hostname, port: value.port, location: value.location, tls_verify: value.tls_verify, is_demo: value.adapter === 'demo', capabilities: { protocols: value.protocols.split(',').map((p) => p.trim()).filter(Boolean) }, credentials }; return server ? api.put(`/servers/${server.id}`, payload) : api.post('/servers', payload) }, onSuccess: (_, value) => { if (value.adapter === 'mikrotik-routeros' && (!server || Boolean(value.secret))) setBootstrapScript(buildRouterOsBootstrap(value)); else onSuccess() } })
+  const [bootstrapScript, setBootstrapScript] = useState<string | null>(null)
+  const [copyMessage, setCopyMessage] = useState('')
+  const { register, handleSubmit, watch, setError, formState: { errors } } = useForm<ServerValues>({
+    resolver: zodResolver(serverSchema),
+    defaultValues: {
+      name: server?.name, adapter: (server?.adapter as ServerValues['adapter']) ?? 'linux-agent', hostname: server?.hostname,
+      port: server?.port ?? 443, location: server?.location, protocols: server?.capabilities.protocols?.join(',') ?? 'wireguard',
+      username: '', secret: '', routeros_api_ssl: true, routeros_allowed_cidr: '', routeros_certificate: '',
+      routeros_ppp_profile: 'virvpn-standard', routeros_vpn_subnet: '10.250.20.0/24', routeros_vpn_gateway: '10.250.20.1',
+      routeros_vpn_pool: '10.250.20.10-10.250.20.254', routeros_wan_interface: 'ether1', routeros_l2tp_secret: '',
+      tls_verify: server?.tls_verify ?? true,
+    },
+  })
+  const adapter = watch('adapter')
+  const routerosApiSsl = watch('routeros_api_ssl')
+  const secret = watch('secret')
+  const protocols = watch('protocols').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
+  const needsServiceCertificate = protocols.includes('sstp') || protocols.includes('openvpn')
+  const needsL2tpSecret = protocols.includes('l2tp-ipsec')
+  const isNewRouterOsServer = !server || server.adapter !== 'mikrotik-routeros'
+  const requiresRouterOsBootstrap = adapter === 'mikrotik-routeros' && (isNewRouterOsServer || Boolean(secret))
+  const save = useMutation({
+    mutationFn: (value: ServerValues) => {
+      let credentials: Record<string, unknown> | undefined
+      if (value.adapter === 'linux-agent' && value.secret) credentials = { agent_shared_secret: value.secret }
+      if (value.adapter === 'mikrotik-routeros') {
+        credentials = {
+          ...(isNewRouterOsServer || value.secret ? {
+            routeros_username: value.username, routeros_password: value.secret, routeros_api_ssl: value.routeros_api_ssl,
+            routeros_allowed_cidr: value.routeros_allowed_cidr, routeros_certificate: value.routeros_certificate,
+          } : {}),
+          routeros_ppp_profile: value.routeros_ppp_profile,
+        }
+      }
+      const payload = {
+        name: value.name, adapter: value.adapter, hostname: value.hostname, port: value.port, location: value.location,
+        tls_verify: value.tls_verify, is_demo: value.adapter === 'demo',
+        capabilities: { protocols: value.protocols.split(',').map((item) => item.trim()).filter(Boolean) }, credentials,
+      }
+      return server ? api.put(`/servers/${server.id}`, payload) : api.post('/servers', payload)
+    },
+    onSuccess: (_, value) => value.adapter === 'mikrotik-routeros' ? setBootstrapScript(buildRouterOsBootstrap(value)) : onSuccess(),
+  })
   const submit = (value: ServerValues) => {
     if (requiresRouterOsBootstrap && !value.routeros_allowed_cidr) { setError('routeros_allowed_cidr', { message: 'Required to restrict RouterOS API access.' }); return }
-    if (requiresRouterOsBootstrap && value.routeros_api_ssl && !value.routeros_certificate) { setError('routeros_certificate', { message: 'Required when API-SSL is enabled.' }); return }
+    if (requiresRouterOsBootstrap && !value.username?.trim()) { setError('username', { message: 'Enter the RouterOS API username with its password.' }); return }
+    if ((requiresRouterOsBootstrap && value.routeros_api_ssl || needsServiceCertificate) && !value.routeros_certificate) { setError('routeros_certificate', { message: 'Required for API-SSL, SSTP, or OpenVPN.' }); return }
+    if (needsL2tpSecret && (value.routeros_l2tp_secret?.length ?? 0) < 16) { setError('routeros_l2tp_secret', { message: 'Use a unique IPsec secret with at least 16 characters.' }); return }
     save.mutate(value)
   }
   const finishBootstrap = () => { setBootstrapScript(null); onSuccess() }
-  const copyBootstrap = async () => { if (!bootstrapScript) return; try { await navigator.clipboard.writeText(bootstrapScript); setCopyMessage('Script copied. Paste it into the RouterOS terminal.'); } catch { setCopyMessage('Clipboard access was blocked. Select the script and copy it manually.'); } }
-  if (bootstrapScript) return <Modal title="RouterOS bootstrap script" close={finishBootstrap}><p className="form-help">Server registered. This script is shown only now and contains the API password; keep it out of chat logs and paste it only into the intended CHR.</p><p className="script-warning">Before pasting: make sure the certificate name exists on RouterOS and the control-plane CIDR is correct. The script does not change firewall rules.</p><textarea className="script-output" readOnly aria-label="RouterOS bootstrap script" value={bootstrapScript} rows={21} /><p className="form-help">It creates or updates a dedicated <span className="mono">vpnops-api</span> user group, restricts the API service to the specified CIDR, and leaves VPN configuration unchanged.</p>{copyMessage && <p className="form-help">{copyMessage}</p>}<div className="modal-actions"><button type="button" className="button quiet" onClick={finishBootstrap}>Done</button><button type="button" className="button primary" onClick={copyBootstrap}><Copy size={16} />Copy script</button></div></Modal>
-  return <Modal title={server ? 'Edit server' : 'Register server'} close={close}><form className="form-grid" onSubmit={handleSubmit(submit)}><label>Name<input {...register('name')} placeholder="Singapore Edge 01" /></label><label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux agent (HTTPS)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label><label>Hostname / IP<input {...register('hostname')} placeholder="vpn-edge.example.net" /></label><label>Port<input type="number" {...register('port')} />{adapter === 'mikrotik-routeros' && <small>API-SSL normally uses 8729; API uses 8728.</small>}</label><label className="span-2">Location<input {...register('location')} placeholder="Singapore, SG" /></label><label className="span-2">Supported protocols<input {...register('protocols')} placeholder="wireguard,openvpn" /><small>Comma-separated: wireguard, openvpn, l2tp-ipsec, sstp, ppp, pptp.</small></label>{adapter === 'linux-agent' && <label className="span-2">Linux agent shared secret<input type="password" {...register('secret')} placeholder={server ? 'Leave blank to keep the stored secret' : 'Minimum 32 characters; stored encrypted'} /></label>}{adapter === 'mikrotik-routeros' && <><label>RouterOS API username<input autoComplete="username" {...register('username')} placeholder={server ? 'Enter again only when changing credentials' : 'vpnops-api'} /></label><label>RouterOS API password<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Leave blank to keep stored credentials' : 'Stored encrypted; never shown again'} /></label><label className="check span-2"><input type="checkbox" {...register('routeros_api_ssl')} /> Use RouterOS API-SSL (recommended)</label><label className="span-2">Allowed control-plane CIDR<input {...register('routeros_allowed_cidr')} placeholder="203.0.113.10/32" required={requiresRouterOsBootstrap} /><small>Enter the public IP of this virVPN machine, not the RouterOS hostname or IP. Only this IPv4 host or subnet can reach the API.</small></label>{errors.routeros_allowed_cidr && <small className="field-error span-2">{errors.routeros_allowed_cidr.message}</small>}{routerosApiSsl && <><label className="span-2">RouterOS API-SSL certificate name<input {...register('routeros_certificate')} placeholder="vpnops-api" required={requiresRouterOsBootstrap} /><small>Create or import this certificate on the CHR first. Its name must match RouterOS exactly.</small></label>{errors.routeros_certificate && <small className="field-error span-2">{errors.routeros_certificate.message}</small>}</>}</>}<label className="check span-2"><input type="checkbox" {...register('tls_verify')} /> Verify the endpoint TLS certificate</label>{Object.keys(errors).length > 0 && <p className="form-error span-2">Check the required fields and port range.</p>}{save.isError && <p className="form-error span-2">{apiError(save.error)}</p>}<div className="modal-actions span-2"><button type="button" className="button quiet" onClick={close}>Cancel</button><button className="button primary" disabled={save.isPending}>{save.isPending && <LoaderCircle className="spin" size={16} />}{server ? 'Save changes' : 'Register server'}</button></div></form></Modal>
+  const copyBootstrap = async () => {
+    if (!bootstrapScript) return
+    try { await navigator.clipboard.writeText(bootstrapScript); setCopyMessage('Script copied. Paste it into the RouterOS terminal.') }
+    catch { setCopyMessage('Clipboard access was blocked. Select the script and copy it manually.') }
+  }
+  if (bootstrapScript) return <Modal title="RouterOS deployment script" close={finishBootstrap}>
+    <p className="form-help">The script creates the selected virVPN services, profile, pool, firewall rules, NAT rule, and—when credentials were entered—the restricted API user. It can contain passwords and the L2TP/IPsec secret; keep it out of chat logs.</p>
+    <p className="script-warning">Review the WAN interface and client subnet first. Existing active VPN service settings are left unchanged, so current customers are not interrupted.</p>
+    <textarea className="script-output" readOnly aria-label="RouterOS deployment script" value={bootstrapScript} rows={28} />
+    <p className="form-help">New PPP accounts created by virVPN will use <span className="mono">{watch('routeros_ppp_profile')}</span>. WireGuard creates the server interface only; client peers are added separately.</p>
+    {copyMessage && <p className="form-help">{copyMessage}</p>}
+    <div className="modal-actions"><button type="button" className="button quiet" onClick={finishBootstrap}>Done</button><button type="button" className="button primary" onClick={copyBootstrap}><Copy size={16} />Copy script</button></div>
+  </Modal>
+  return <Modal title={server ? 'Edit server' : 'Register server'} close={close}>
+    <form className="form-grid" onSubmit={handleSubmit(submit)}>
+      <label>Name<input {...register('name')} placeholder="Singapore Edge 01" /></label>
+      <label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux agent (HTTPS)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label>
+      <label>Hostname / IP<input {...register('hostname')} placeholder="vpn-edge.example.net" /></label>
+      <label>Port<input type="number" {...register('port')} />{adapter === 'mikrotik-routeros' && <small>API-SSL normally uses 8729; API uses 8728.</small>}</label>
+      <label className="span-2">Location<input {...register('location')} placeholder="Singapore, SG" /></label>
+      <label className="span-2">Supported protocols<input {...register('protocols')} placeholder="wireguard,openvpn" /><small>Comma-separated: wireguard, openvpn, l2tp-ipsec, sstp, ppp, pptp.</small></label>
+      {adapter === 'linux-agent' && <label className="span-2">Linux agent shared secret<input type="password" {...register('secret')} placeholder={server ? 'Leave blank to keep the stored secret' : 'Minimum 32 characters; stored encrypted'} /></label>}
+      {adapter === 'mikrotik-routeros' && <>
+        <label>RouterOS API username<input autoComplete="username" {...register('username')} placeholder={server ? 'Enter again only when changing credentials' : 'virvpn-api'} />{errors.username && <small className="field-error">{errors.username.message}</small>}</label>
+        <label>RouterOS API password<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Leave blank to keep stored credentials' : 'Stored encrypted; never shown again'} /></label>
+        <label className="check span-2"><input type="checkbox" {...register('routeros_api_ssl')} />Use RouterOS API-SSL (recommended)</label>
+        <label className="span-2">Allowed control-plane CIDR<input {...register('routeros_allowed_cidr')} placeholder="203.0.113.10/32" required={requiresRouterOsBootstrap} /><small>Public IP of the virVPN server only—not the RouterOS address.</small></label>
+        {errors.routeros_allowed_cidr && <small className="field-error span-2">{errors.routeros_allowed_cidr.message}</small>}
+        {(routerosApiSsl || needsServiceCertificate) && <><label className="span-2">RouterOS API-SSL / VPN certificate name<input {...register('routeros_certificate')} placeholder="sstp-template" /><small>Required for API-SSL, SSTP, and OpenVPN. The name must exactly match RouterOS.</small></label>{errors.routeros_certificate && <small className="field-error span-2">{errors.routeros_certificate.message}</small>}</>}
+        <section className="routeros-setup span-2">
+          <div><p className="eyebrow">PASTE-READY VPN SETUP</p><h3>Dedicated virVPN service profile</h3><p>These values build an idempotent script. It creates only named virVPN objects and leaves existing active service settings untouched.</p></div>
+          <div className="routeros-setup-grid">
+            <label>PPP profile<input {...register('routeros_ppp_profile')} /><small>Assigned to new virVPN PPP accounts.</small></label>
+            <label>WAN interface<input {...register('routeros_wan_interface')} /><small>Usually ether1; used for NAT.</small></label>
+            <label>VPN client subnet<input {...register('routeros_vpn_subnet')} /></label>
+            <label>VPN gateway<input {...register('routeros_vpn_gateway')} /></label>
+            <label className="span-2">VPN client pool<input {...register('routeros_vpn_pool')} /></label>
+            {needsL2tpSecret && <label className="span-2">L2TP/IPsec pre-shared secret<input type="password" autoComplete="new-password" {...register('routeros_l2tp_secret')} /><small>Shown only in the generated script; use a unique secret with at least 16 characters.</small>{errors.routeros_l2tp_secret && <small className="field-error">{errors.routeros_l2tp_secret.message}</small>}</label>}
+          </div>
+          {protocols.includes('pptp') && <p className="script-warning">PPTP is legacy and weak. Select it only for an unavoidable legacy client.</p>}
+        </section>
+      </>}
+      <label className="check span-2"><input type="checkbox" {...register('tls_verify')} />Verify the endpoint TLS certificate</label>
+      {Object.keys(errors).length > 0 && <p className="form-error span-2">Check the required fields and network ranges.</p>}
+      {save.isError && <p className="form-error span-2">{apiError(save.error)}</p>}
+      <div className="modal-actions span-2"><button type="button" className="button quiet" onClick={close}>Cancel</button><button className="button primary" disabled={save.isPending}>{save.isPending && <LoaderCircle className="spin" size={16} />}{adapter === 'mikrotik-routeros' ? 'Save & generate script' : server ? 'Save changes' : 'Register server'}</button></div>
+    </form>
+  </Modal>
 }
 
 function Accounts() {

@@ -28,6 +28,26 @@
   box-shadow: 0 0 0 3px rgba(55, 203, 198, .12);
 }
 
+.routeros-setup {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #29495a;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(14, 46, 57, .58), rgba(9, 23, 36, .82));
+}
+
+.routeros-setup h3 { margin: 4px 0 5px; color: #e6f5f7; font-size: 15px; }
+.routeros-setup p:not(.eyebrow):not(.script-warning) { margin: 0; color: #94adbc; font-size: 11px; line-height: 1.55; }
+.routeros-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.routeros-setup-grid label { display: grid; gap: 6px; color: #b0c2ce; font-size: 11px; font-weight: 650; }
+.routeros-setup-grid input { min-width: 0; }
+.routeros-setup-grid small { color: #7893a4; font-weight: 500; line-height: 1.4; }
+
+@media (max-width: 560px) {
+  .routeros-setup-grid { grid-template-columns: 1fr; }
+}
+
 .settings-panels {
   margin-bottom: 16px;
 }

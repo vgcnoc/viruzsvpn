@@ -74,11 +74,15 @@ final class MikroTikAdapter extends AbstractAdapter
         }
         try {
             $password = $account->encrypted_provisioning_secret ? Crypt::decryptString($account->encrypted_provisioning_secret) : null;
+            $credentials = $server->encrypted_credentials ? json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR) : [];
             if (! is_string($password) || $password === '') {
                 return $this->missingProvisioningSecret();
             }
             $client = $this->client($server);
             $query = (new Query('/ppp/secret/add'))->equal('name', $account->identifier)->equal('password', $password)->equal('service', $service)->equal('disabled', 'no')->equal('comment', $this->comment($account));
+            if (! empty($credentials['routeros_ppp_profile'])) {
+                $query->equal('profile', $credentials['routeros_ppp_profile']);
+            }
             if ($account->allocated_ip) {
                 $query->equal('remote-address', $account->allocated_ip);
             }
