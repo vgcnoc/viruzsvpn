@@ -35,15 +35,17 @@ function Brand({ large = false }: { large?: boolean }) {
 }
 
 function App() {
+  const client = useQueryClient()
   const [token, setToken] = useState(() => localStorage.getItem('vpn-platform-token'))
   const [mobileOpen, setMobileOpen] = useState(false)
   const session = useQuery({ queryKey: ['auth-me'], enabled: Boolean(token), retry: false, queryFn: () => api.get<AuthUser>('/auth/me').then((r) => r.data) })
   useEffect(() => { if (session.isError) { localStorage.removeItem('vpn-platform-token'); setToken(null) } }, [session.isError])
-  const signOut = () => { void api.post('/auth/logout').catch(() => undefined); localStorage.removeItem('vpn-platform-token'); setToken(null) }
+  const signOut = () => { void api.post('/auth/logout').catch(() => undefined); localStorage.removeItem('vpn-platform-token'); client.removeQueries({ queryKey: ['auth-me'] }); setToken(null) }
 
-  if (!token) return <Login onAuthenticated={(value) => { localStorage.setItem('vpn-platform-token', value); setToken(value) }} />
+  if (!token) return <Login onAuthenticated={(value) => { client.removeQueries({ queryKey: ['auth-me'] }); localStorage.setItem('vpn-platform-token', value); setToken(value) }} />
   if (session.isLoading || session.isError || !session.data) return <SessionLoading />
-  if (session.data.role !== 'administrator') return <CustomerPortal user={session.data} onSignOut={signOut} />
+  if (session.data.role === 'customer') return <CustomerPortal user={session.data} onSignOut={signOut} />
+  if (session.data.role !== 'administrator') return <div className="login-page"><div className="session-loading">Akun ini belum memiliki akses portal. <button className="button quiet" onClick={signOut}>Keluar</button></div></div>
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
