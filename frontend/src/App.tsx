@@ -57,10 +57,18 @@ function Login({ onAuthenticated }: { onAuthenticated: (token: string) => void }
   const createAccount = useMutation({ mutationFn: (values: RegistrationValues) => api.post<AuthResponse>('/auth/register', values).then((r) => r.data), onSuccess: ({ token }) => onAuthenticated(token) })
   const goBack = () => { signIn.reset(); createAccount.reset(); setScreen('welcome') }
 
-  return <div className="login-page"><main className={`login-card auth-card ${screen === 'welcome' ? 'auth-choice' : ''}`}>
-    {screen !== 'welcome' && <button className="auth-back" type="button" onClick={goBack}><ArrowLeft size={16} />Back</button>}
-    <div className="brand large"><span className="brand-mark"><ShieldCheck size={24} /></span><span>VPN<span>OPS</span></span></div>
-    {screen === 'welcome' && <><p className="eyebrow">VPN CONTROL PLANE</p><h1>Access with confidence.</h1><p className="muted">A focused workspace for managing trusted VPN infrastructure.</p><div className="auth-choice-actions"><button className="button primary wide" type="button" onClick={() => setScreen('login')}>Sign in</button><button className="button quiet wide" type="button" onClick={() => setScreen('register')}>Create account</button></div><p className="auth-footnote"><ShieldCheck size={14} />Authorized administrator access only.</p></>}
+  return <div className="login-page"><div className="auth-shell">
+    <aside className="auth-showcase">
+      <div className="brand large"><span className="brand-mark"><ShieldCheck size={24} /></span><span>VPN<span>OPS</span></span></div>
+      <div className="auth-showcase-copy"><p className="eyebrow">NETWORK OPERATIONS PLATFORM</p><h1>VPN management,<br /><span>made deliberate.</span></h1><p>One considered workspace for the infrastructure, accounts, and operational decisions that keep your network moving.</p></div>
+      <div className="auth-network-visual" aria-hidden="true"><div className="visual-label"><span />CONTROL PLANE</div><div className="visual-grid"><i className="visual-line line-one" /><i className="visual-line line-two" /><i className="visual-line line-three" /><b className="visual-node node-core"><ShieldCheck size={18} /></b><b className="visual-node node-one" /><b className="visual-node node-two" /><b className="visual-node node-three" /><div className="visual-card"><small>OPERATIONAL ACCESS</small><strong>Designed for secure, focused work.</strong></div></div></div>
+      <div className="auth-capabilities"><span><b>01</b>Protected access</span><span><b>02</b>Central control</span><span><b>03</b>Clear operations</span></div>
+      <p className="auth-showcase-footer">Built for teams operating trusted VPN infrastructure.</p>
+    </aside>
+    <main className={`login-card auth-card ${screen === 'welcome' ? 'auth-choice' : ''}`}>
+      <div className="auth-card-top"><span className="auth-card-dot" /><span>SECURE SESSION</span></div>
+      {screen !== 'welcome' && <button className="auth-back" type="button" onClick={goBack}><ArrowLeft size={16} />Back</button>}
+      {screen === 'welcome' && <><p className="eyebrow">ADMINISTRATOR ACCESS</p><h1>Welcome to the control plane.</h1><p className="muted">Sign in to continue managing your VPN environment, or set up its first administrator.</p><div className="auth-choice-actions"><button className="button primary wide" type="button" onClick={() => setScreen('login')}>Sign in to VPNOPS</button><button className="button quiet wide" type="button" onClick={() => setScreen('register')}>Create administrator account</button></div><p className="auth-footnote"><ShieldCheck size={14} />Your credentials are never shown or stored in this browser.</p></>}
     {screen === 'login' && <><p className="eyebrow">WELCOME BACK</p><h1>Sign in</h1><p className="muted">Use your administrator credentials to continue.</p><form className="auth-form" onSubmit={submitLogin((values) => signIn.mutate(values))}>
       <label>Email address<input {...registerLogin('email')} autoComplete="email" /></label>{loginErrors.email && <small className="field-error">{loginErrors.email.message}</small>}
       <label>Password<input {...registerLogin('password')} type="password" autoComplete="current-password" /></label>{loginErrors.password && <small className="field-error">{loginErrors.password.message}</small>}
@@ -73,7 +81,8 @@ function Login({ onAuthenticated }: { onAuthenticated: (token: string) => void }
       <label>Confirm password<input {...registerAccount('password_confirmation')} type="password" autoComplete="new-password" /></label>{registrationErrors.password_confirmation && <small className="field-error">{registrationErrors.password_confirmation.message}</small>}
       {createAccount.isError && <p className="form-error">{apiError(createAccount.error)}</p>}<button className="button primary wide" disabled={createAccount.isPending}>{createAccount.isPending && <LoaderCircle className="spin" size={16} />}Create administrator</button>
     </form><p className="auth-switch">Already have an account? <button type="button" onClick={() => setScreen('login')}>Sign in</button></p></>}
-  </main></div>
+    </main>
+  </div></div>
 }
 
 function Overview() {
