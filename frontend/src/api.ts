@@ -1,7 +1,13 @@
 import axios from 'axios'
 
+const configuredApiUrl = import.meta.env.VITE_API_URL
+const loopbackUrl = /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i
+const apiBaseUrl = import.meta.env.PROD && configuredApiUrl && loopbackUrl.test(configuredApiUrl)
+  ? '/api'
+  : configuredApiUrl ?? (import.meta.env.DEV ? 'http://127.0.0.1:8001/api' : '/api')
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000/api',
+  baseURL: apiBaseUrl,
   headers: { Accept: 'application/json' },
 })
 
