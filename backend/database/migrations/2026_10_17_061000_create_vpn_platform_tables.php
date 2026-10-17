@@ -76,8 +76,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('vpn_account_id')->constrained('vpn_accounts')->cascadeOnDelete();
             $table->foreignId('plan_id')->constrained()->restrictOnDelete();
-            $table->timestamp('starts_at');
-            $table->timestamp('expires_at');
+            $table->dateTime('starts_at');
+            $table->dateTime('expires_at');
             $table->string('status')->default('active');
             $table->unsignedInteger('amount_cents');
             $table->string('currency', 3);
