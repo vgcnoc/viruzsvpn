@@ -1,0 +1,29 @@
+.script-warning {
+  margin: 12px 0;
+  padding: 10px 11px;
+  color: #f1c66a;
+  background: #302818;
+  border: 1px solid #605028;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.script-output {
+  width: 100%;
+  min-height: 310px;
+  padding: 12px;
+  color: #c9f0ed;
+  background: #07111b;
+  border: 1px solid #294553;
+  border-radius: 6px;
+  resize: vertical;
+  outline: none;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre;
+}
+
+.script-output:focus {
+  border-color: #44c9c5;
+  box-shadow: 0 0 0 3px rgba(55, 203, 198, .12);
+}

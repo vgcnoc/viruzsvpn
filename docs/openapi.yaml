@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: VPN Management Platform API
+  version: 1.0.0
+  description: >-
+    Token-authenticated control-plane API. Server connectivity results are only
+    returned after a driver operation; demo records are explicitly marked.
+servers:
+  - url: http://127.0.0.1:8000/api
+paths:
+  /auth/login:
+    post:
+      summary: Create a Sanctum bearer-token session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, format: password}
+      responses: {'200': {description: Authenticated}, '422': {description: Invalid credentials}}
+  /dashboard:
+    get:
+      security: [{bearerAuth: []}]
+      summary: Read account and server overview
+      responses: {'200': {description: Overview}}
+  /servers:
+    get:
+      security: [{bearerAuth: []}]
+      summary: List registered control endpoints
+      responses: {'200': {description: Paginated servers}}
+    post:
+      security: [{bearerAuth: []}]
+      summary: Register a server configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, adapter, hostname, port]
+              properties:
+                adapter: {type: string, enum: [linux-agent, mikrotik-routeros, demo]}
+                credentials:
+                  type: object
+                  description: Linux requires agent_shared_secret; RouterOS requires routeros_username and routeros_password. Values are encrypted at rest and omitted from responses.
+      responses: {'201': {description: Server created}, '422': {description: Validation error}}
+  /servers/{server}/test:
+    post:
+      security: [{bearerAuth: []}]
+      summary: Run a driver connection test and record its actual result
+      parameters: [{name: server, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: Test result}}
+  /accounts:
+    get:
+      security: [{bearerAuth: []}]
+      summary: List VPN accounts without returning client secrets
+      responses: {'200': {description: Paginated accounts}}
+    post:
+      security: [{bearerAuth: []}]
+      summary: Queue a validated provisioning request
+      parameters: [{name: Idempotency-Key, in: header, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vpn_server_id, protocol, identifier]
+              properties:
+                wireguard_public_key: {type: string, description: Required for Linux WireGuard peers; never a private key.}
+                credentials:
+                  type: object
+                  properties:
+                    password: {type: string, format: password, description: One-time RouterOS PPP password; cleared after successful provisioning.}
+      responses: {'202': {description: Provisioning accepted}, '409': {description: Unsupported operation}, '422': {description: Validation error}}
+  /accounts/{account}/retry:
+    post:
+      security: [{bearerAuth: []}]
+      summary: Requeue a failed provisioning request while its one-time secret remains available
+      parameters: [{name: account, in: path, required: true, schema: {type: integer}}]
+      responses: {'202': {description: Provisioning requeued}, '409': {description: Account is not failed}}
+  /plans:
+    get:
+      security: [{bearerAuth: []}]
+      summary: List commercial plans
+      responses: {'200': {description: Paginated plans}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: Sanctum token}
