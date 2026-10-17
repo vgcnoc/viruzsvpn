@@ -166,78 +166,66 @@ function buildRouterOsBootstrap(value: ServerValues) {
   const prefix = value.routeros_vpn_subnet.split('/')[1] ?? '24'
   const apiCredentialsPresent = Boolean(value.username?.trim() && value.secret)
   const certificateCheck = usesCertificate ? `:put "virVPN: checking certificate..."
-/certificate
-:if ([:len [find where name=$certificateName]] = 0) do={
+:if ([:len [/certificate find where name=$certificateName]] = 0) do={
     :put ("virVPN ERROR: certificate " . $certificateName . " was not found. No configuration was changed.")
     :error ("virVPN: create or import the certificate before running this script.")
 }
 ` : ''
   const certificateSetting = value.routeros_api_ssl ? ' certificate=$certificateName' : ''
-  const allowInput = (protocol: 'tcp' | 'udp' | 'ipsec-esp', port: number | null, label: string) => `/ip firewall filter
-:if ([:len [find where comment="virVPN allow ${label}"]] = 0) do={
-    add chain=input action=accept protocol=${protocol}${port ? ` dst-port=${port}` : ''} comment="virVPN allow ${label}" place-before=0
+  const allowInput = (protocol: 'tcp' | 'udp' | 'ipsec-esp', port: number | null, label: string) => `:if ([:len [/ip firewall filter find where comment="virVPN allow ${label}"]] = 0) do={
+    /ip firewall filter add chain=input action=accept protocol=${protocol}${port ? ` dst-port=${port}` : ''} comment="virVPN allow ${label}" place-before=0
 }`
-  const apiSection = apiCredentialsPresent ? `/user group
-:if ([:len [find where name="vpnops-api"]] = 0) do={
-    add name="vpnops-api" policy=read,write,api
+  const apiSection = apiCredentialsPresent ? `:if ([:len [/user group find where name="vpnops-api"]] = 0) do={
+    /user group add name="vpnops-api" policy=read,write,api
 } else={
-    set [find where name="vpnops-api"] policy=read,write,api
+    /user group set [/user group find where name="vpnops-api"] policy=read,write,api
 }
 
-/user
-:if ([:len [find where name=$vpnopsUser]] = 0) do={
-    add name=$vpnopsUser password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
+:if ([:len [/user find where name=$vpnopsUser]] = 0) do={
+    /user add name=$vpnopsUser password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
 } else={
-    set [find where name=$vpnopsUser] password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
+    /user set [/user find where name=$vpnopsUser] password=$vpnopsPassword group="vpnops-api" comment="virVPN control plane"
 }
 
-/ip service
-set ${apiService} disabled=no port=${value.port} address=$controlPlaneCidr${certificateSetting}
+/ip service set ${apiService} disabled=no port=${value.port} address=$controlPlaneCidr${certificateSetting}
 :put "virVPN OK: ${apiService} is enabled on TCP ${value.port}."` : `# API credentials were not entered, so the existing virVPN API user and API service are unchanged.
 # This is expected when generating a service script from Edit server.`
-  const profileSection = `/ip pool
-:if ([:len [find where name=$vpnPool]] = 0) do={
-    add name=$vpnPool ranges=$vpnRange comment="virVPN client addresses"
+  const profileSection = `:if ([:len [/ip pool find where name="virvpn-pool"]] = 0) do={
+    /ip pool add name="virvpn-pool" ranges=${routerOsQuote(value.routeros_vpn_pool)} comment="virVPN client addresses"
 } else={
     :put "virVPN: IP pool already exists; it was left unchanged."
 }
 
-/ppp profile
-:if ([:len [find where name=$vpnProfile]] = 0) do={
-    add name=$vpnProfile local-address=$vpnGateway remote-address=$vpnPool dns-server=1.1.1.1,1.0.0.1 use-encryption=required change-tcp-mss=default comment="virVPN managed PPP profile"
+:if ([:len [/ppp profile find where name=${routerOsQuote(value.routeros_ppp_profile)}]] = 0) do={
+    /ppp profile add name=${routerOsQuote(value.routeros_ppp_profile)} local-address=${routerOsQuote(value.routeros_vpn_gateway)} remote-address="virvpn-pool" dns-server=1.1.1.1,1.0.0.1 use-encryption=required change-tcp-mss=default comment="virVPN managed PPP profile"
 } else={
     :put "virVPN: PPP profile already exists; it was left unchanged."
 }
 
-/ip firewall nat
-:if ([:len [find where comment="virVPN NAT"]] = 0) do={
-    add chain=srcnat action=masquerade src-address=$vpnSubnet out-interface=$wanInterface comment="virVPN NAT"
+:if ([:len [/ip firewall nat find where comment="virVPN NAT"]] = 0) do={
+    /ip firewall nat add chain=srcnat action=masquerade src-address=${routerOsQuote(value.routeros_vpn_subnet)} out-interface=${routerOsQuote(value.routeros_wan_interface)} comment="virVPN NAT"
 }
 
-/ip firewall filter
-:if ([:len [find where comment="virVPN forward outbound"]] = 0) do={
-    add chain=forward action=accept src-address=$vpnSubnet out-interface=$wanInterface comment="virVPN forward outbound" place-before=0
+:if ([:len [/ip firewall filter find where comment="virVPN forward outbound"]] = 0) do={
+    /ip firewall filter add chain=forward action=accept src-address=${routerOsQuote(value.routeros_vpn_subnet)} out-interface=${routerOsQuote(value.routeros_wan_interface)} comment="virVPN forward outbound" place-before=0
 }
-:if ([:len [find where comment="virVPN forward return"]] = 0) do={
-    add chain=forward action=accept dst-address=$vpnSubnet connection-state=established,related comment="virVPN forward return" place-before=0
+:if ([:len [/ip firewall filter find where comment="virVPN forward return"]] = 0) do={
+    /ip firewall filter add chain=forward action=accept dst-address=${routerOsQuote(value.routeros_vpn_subnet)} connection-state=established,related comment="virVPN forward return" place-before=0
 }`
   const wireGuardSection = has('wireguard') ? `
 
-/interface wireguard
-:if ([:len [find where name="virvpn-wg"]] = 0) do={
-    add name="virvpn-wg" listen-port=51820 mtu=1420 comment="virVPN managed WireGuard"
+:if ([:len [/interface wireguard find where name="virvpn-wg"]] = 0) do={
+    /interface wireguard add name="virvpn-wg" listen-port=51820 mtu=1420 comment="virVPN managed WireGuard"
 }
-/ip address
-:if ([:len [find where interface="virvpn-wg" and address=$vpnGatewayWithPrefix]] = 0) do={
-    add address=$vpnGatewayWithPrefix interface="virvpn-wg" comment="virVPN WireGuard gateway"
+:if ([:len [/ip address find where interface="virvpn-wg" and address=$vpnGatewayWithPrefix]] = 0) do={
+    /ip address add address=$vpnGatewayWithPrefix interface="virvpn-wg" comment="virVPN WireGuard gateway"
 }
 ${allowInput('udp', 51820, 'WireGuard')}` : ''
   const sstpSection = has('sstp') ? `
 
 ${allowInput('tcp', 443, 'SSTP')}
-/interface sstp-server server
-:if ([get [find] disabled] = true) do={
-    set enabled=yes port=443 certificate=$certificateName default-profile=$vpnProfile authentication=mschap2 pfs=yes
+:if ([/interface sstp-server server get disabled] = true) do={
+    /interface sstp-server server set enabled=yes port=443 certificate=$certificateName default-profile=$vpnProfile authentication=mschap2 pfs=yes
 } else={
     :put "virVPN: SSTP is already active; its global settings were left unchanged."
 }` : ''
@@ -247,27 +235,24 @@ ${allowInput('udp', 1701, 'L2TP')}
 ${allowInput('udp', 500, 'IPsec IKE')}
 ${allowInput('udp', 4500, 'IPsec NAT-T')}
 ${allowInput('ipsec-esp', null, 'IPsec ESP')}
-/interface l2tp-server server
-:if ([get [find] disabled] = true) do={
-    set enabled=yes use-ipsec=required ipsec-secret=$l2tpSecret default-profile=$vpnProfile authentication=mschap2
+:if ([/interface l2tp-server server get disabled] = true) do={
+    /interface l2tp-server server set enabled=yes use-ipsec=required ipsec-secret=$l2tpSecret default-profile=$vpnProfile authentication=mschap2
 } else={
     :put "virVPN: L2TP is already active; its global settings were left unchanged."
 }` : ''
   const openVpnSection = has('openvpn') ? `
 
 ${allowInput('tcp', 1194, 'OpenVPN')}
-/interface ovpn-server server
-:if ([get [find] disabled] = true) do={
-    set enabled=yes port=1194 mode=ip certificate=$certificateName default-profile=$vpnProfile require-client-certificate=no
+:if ([/interface ovpn-server server get disabled] = true) do={
+    /interface ovpn-server server set enabled=yes port=1194 mode=ip certificate=$certificateName default-profile=$vpnProfile require-client-certificate=no
 } else={
     :put "virVPN: OpenVPN is already active; its global settings were left unchanged."
 }` : ''
   const pptpSection = has('pptp') ? `
 
 ${allowInput('tcp', 1723, 'PPTP')}
-/interface pptp-server server
-:if ([get [find] disabled] = true) do={
-    set enabled=yes default-profile=$vpnProfile authentication=mschap2
+:if ([/interface pptp-server server get disabled] = true) do={
+    /interface pptp-server server set enabled=yes default-profile=$vpnProfile authentication=mschap2
 } else={
     :put "virVPN: PPTP is already active; its global settings were left unchanged."
 }` : ''
