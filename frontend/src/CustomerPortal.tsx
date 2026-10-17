@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, CheckCircle2, CircleDollarSign, CreditCard, LayoutDashboard, LifeBuoy, LoaderCircle, LogOut, Menu, Plus, Server, Settings2, ShieldCheck, X } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleDollarSign, Copy, CreditCard, LayoutDashboard, LifeBuoy, LoaderCircle, LogOut, Menu, Plus, Server, Settings2, ShieldCheck, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { api, apiError } from './api'
 import type { Account, BillingSettings, Catalog, CustomerServer, Page, Plan, VpnOrder } from './api'
+import SstpClientSetup from './SstpClientSetup'
+import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './customer.css'
 import './customer-extras.css'
 import './pagination.css'
@@ -100,8 +102,9 @@ function InvoiceCard({ order, onChange }: { order: VpnOrder; onChange: () => voi
 
 function ServiceRows({ accounts, onRenew, onOpenBilling }: { accounts: Account[]; onRenew: () => void; onOpenBilling: () => void }) {
   const [error, setError] = useState('')
+  const [setupAccount, setSetupAccount] = useState<Account | null>(null)
   const renew = useMutation({ mutationFn: (accountId: number) => api.post(`/customer/accounts/${accountId}/renew`), onSuccess: () => { onRenew(); onOpenBilling() }, onError: error => setError(apiError(error)) })
-  return <div className="cp-service-list">{accounts.map(account => <div className="cp-service" key={account.id}><span className="cp-row-icon"><Server size={20} /></span><div className="cp-service-main"><h3>{account.identifier}<span className={`cp-state ${account.status}`}>{statusLabel[account.status] ?? account.status}</span></h3><p>{account.plan?.name ?? 'Paket VPN'} · {account.protocol} · {account.server?.name}</p><small>Alamat server: {account.server?.hostname ?? '—'} · Berlaku hingga {tanggal(account.expires_at)}</small>{account.status === 'active' && account.protocol === 'sstp' && <small className="cp-secret-note">Pengaturan perangkat: tipe SSTP, server <code>{account.server?.hostname}</code>, username <code>{account.identifier}</code>, dan password VPN yang Anda buat saat memesan.</small>}{account.l2tp_psk && <small className="cp-secret-note">Pengaturan perangkat: tipe L2TP/IPsec PSK, server <code>{account.server?.hostname}</code>, username <code>{account.identifier}</code>, dan password VPN yang Anda buat saat memesan. IPsec pre-shared key: <code>{account.l2tp_psk}</code> (berbeda dari password VPN).</small>}</div>{account.status === 'active' && account.plan && <button className="cp-secondary" disabled={renew.isPending} onClick={() => renew.mutate(account.id)}>Perpanjang</button>}</div>)}{error && <p className="cp-error">{error}</p>}</div>
+  return <div className="cp-service-list">{accounts.map(account => <div className="cp-service" key={account.id}><span className="cp-row-icon"><Server size={20} /></span><div className="cp-service-main"><h3>{account.identifier}<span className={`cp-state ${account.status}`}>{statusLabel[account.status] ?? account.status}</span></h3><p>{account.plan?.name ?? 'Paket VPN'} · {account.protocol} · {account.server?.name}</p><small>Alamat server: {account.server?.hostname ?? '—'} · Berlaku hingga {tanggal(account.expires_at)}</small>{account.status === 'active' && account.protocol === 'sstp' && <small className="cp-secret-note">Pengaturan perangkat: tipe SSTP, server <code>{account.server?.hostname}</code>, username <code>{account.identifier}</code>, dan password VPN yang Anda buat saat memesan.</small>}{account.l2tp_psk && <small className="cp-secret-note">Pengaturan perangkat: tipe L2TP/IPsec PSK, server <code>{account.server?.hostname}</code>, username <code>{account.identifier}</code>, dan password VPN yang Anda buat saat memesan. IPsec pre-shared key: <code>{account.l2tp_psk}</code> (berbeda dari password VPN).</small>}</div><div className="cp-service-actions">{account.status === 'active' && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST && <button className="cp-secondary" onClick={() => setSetupAccount(account)}><Copy size={15} /> Script MikroTik</button>}{account.status === 'active' && account.plan && <button className="cp-secondary" disabled={renew.isPending} onClick={() => renew.mutate(account.id)}>Perpanjang</button>}</div></div>)}{error && <p className="cp-error">{error}</p>}{setupAccount && <SstpClientSetup account={setupAccount} close={() => setSetupAccount(null)} />}</div>
 }
 
 function AccountSettings({ user }: { user: CustomerUser }) {

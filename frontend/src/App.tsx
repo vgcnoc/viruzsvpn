@@ -9,6 +9,8 @@ import { api, apiError } from './api'
 import CustomerPortal from './CustomerPortal'
 import AdminBilling from './AdminBilling'
 import AdminCustomers from './AdminCustomers'
+import SstpClientSetup from './SstpClientSetup'
+import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './routeros.css'
 import './plans.css'
 import type { Account, Page, Plan, ProvisioningOptions, Server } from './api'
@@ -412,9 +414,21 @@ function Accounts() {
 }
 
 function AccountDetails({ accountId, close }: { accountId: number; close: () => void }) {
+  const [showClientScript, setShowClientScript] = useState(false)
   const query = useQuery({ queryKey: ['account', accountId], queryFn: () => api.get<Account & { provisioning_error?: string; operation_logs: Array<{ id: number; operation: string; status: string; message?: string; created_at: string }> }>(`/accounts/${accountId}`).then((r) => r.data), refetchInterval: result => ['pending', 'provisioning'].includes(result.state.data?.status ?? '') ? 5000 : false })
   const account = query.data
-  return <Modal title={account ? `Akun: ${account.identifier}` : 'Detail akun'} close={close}>{query.isLoading ? <Skeleton rows={4} /> : account ? <div className="activity-list">{account.provisioning_error && <div className="notice error"><Activity size={16} />{account.provisioning_error}</div>}<div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>{account.operation_logs.length ? account.operation_logs.map((log) => <div className="activity" key={log.id}><span className="activity-icon"><Activity size={15} /></span><div><b>{log.operation.replaceAll('_', ' ')}</b><p>{log.message ?? 'Tanpa keterangan tambahan'} · {new Date(log.created_at).toLocaleString('id-ID')}</p></div><span className={statusClass(log.status)}>{log.status}</span></div>) : <Empty icon={<Activity />} title="Belum ada aktivitas" description="Hasil provisioning dan perubahan akun akan tampil di sini." />}</div> : <p className="form-error">Detail akun tidak dapat dimuat.</p>}</Modal>
+  return <>
+    <Modal title={account ? `Akun: ${account.identifier}` : 'Detail akun'} close={close}>
+      {query.isLoading ? <Skeleton rows={4} /> : account ? <div className="activity-list">
+        {account.provisioning_error && <div className="notice error"><Activity size={16} />{account.provisioning_error}</div>}
+        <div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>
+        {account.status === 'active' && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST &&
+          <div className="account-client-action"><p>Gunakan akun ini pada router MikroTik client. Password VPN tidak tersimpan setelah aktivasi, jadi masukkan kembali saat membuat script.</p><button className="button primary" type="button" onClick={() => setShowClientScript(true)}><Copy size={15} /> Generate script MikroTik client</button></div>}
+        {account.operation_logs.length ? account.operation_logs.map(log => <div className="activity" key={log.id}><span className="activity-icon"><Activity size={15} /></span><div><b>{log.operation.replaceAll('_', ' ')}</b><p>{log.message ?? 'Tanpa keterangan tambahan'} · {new Date(log.created_at).toLocaleString('id-ID')}</p></div><span className={statusClass(log.status)}>{log.status}</span></div>) : <Empty icon={<Activity />} title="Belum ada aktivitas" description="Hasil provisioning dan perubahan akun akan tampil di sini." />}
+      </div> : <p className="form-error">Detail akun tidak dapat dimuat.</p>}
+    </Modal>
+    {showClientScript && account && <SstpClientSetup account={account} close={() => setShowClientScript(false)} />}
+  </>
 }
 
 function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (account: Account) => void }) {

@@ -24,3 +24,11 @@
 3. Isi username unik. Untuk RouterOS, pilih SSTP/L2TP-IPsec/OpenVPN/PPTP yang aktif dan isi password VPN; simpan password sebelum mengirim form karena tidak dapat dibaca kembali setelah akun berhasil dibuat. L2TP/IPsec juga memerlukan pre-shared key server yang tersimpan.
 4. Pilih paket bila ingin masa aktif mengikuti paket, atau gunakan **Tanpa paket / manual** dan isi masa aktif hari. Pembuatan manual tidak menerima pembayaran dan tidak membuat invoice. Masa aktif paket manual dimulai setelah provisioning berhasil.
 5. Lihat status di daftar **Akun VPN** dan klik **Detail** untuk hasil worker atau alasan kegagalan. Status pending/provisioning diperbarui otomatis; akun gagal dapat dicoba ulang tanpa mengganti username.
+
+## Menghubungkan MikroTik client ke akun SSTP
+
+- Untuk akun SSTP aktif di `vpn.viruzs.my.id`, buka **Akun VPN → Detail → Generate script MikroTik client**. Pelanggan dengan layanan SSTP aktif juga melihat tombol **Script MikroTik** di **Layanan saya**.
+- Masukkan ulang password VPN yang dipilih saat akun dibuat, kemudian klik **Salin script lengkap**. Password hanya berada di memori browser dan clipboard selama proses ini; aplikasi tidak dapat mengambilnya lagi dari CHR. Jangan membagikan script yang sudah disalin.
+- Paste di terminal **router MikroTik client**, bukan di CHR server. Script mengunduh CA publik dari `https://vpn2.viruzs.my.id/viruzs-local-ca.crt` melalui HTTPS dengan verifikasi sertifikat, memeriksa fingerprint SHA-256 CA, lalu membuat SSTP client dengan verifikasi sertifikat dan hostname server aktif. Router client harus bisa menyelesaikan DNS, memiliki waktu yang benar, dan menjangkau HTTPS. Jika fetch gagal, unduh CA lewat browser, unggah ke Files router client, dan impor CA secara manual sebelum mencoba ulang.
+- Script tidak menambah default route, NAT, atau mengubah koneksi internet router. Periksa tanda `R` di **Interfaces → SSTP Client** atau hasil `/interface sstp-client print detail`. Jika belum berjalan, periksa `/log print where topics~"sstp"`. Routing jaringan di balik VPN diatur terpisah sesuai kebutuhan.
+- CA ini adalah sertifikat publik untuk CHR Sukabumi BC1, bukan private key. Masa berlakunya sampai Oktober 2027; bila CA server dirotasi, berkas publik dan fingerprint dalam generator harus diperbarui bersamaan.
