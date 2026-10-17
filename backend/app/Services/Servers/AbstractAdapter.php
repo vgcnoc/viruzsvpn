@@ -57,6 +57,11 @@ abstract class AbstractAdapter implements ServerAdapter
         return $this->unsupported('getActiveSessions');
     }
 
+    public function disconnectSession(VpnServer $server, VpnAccount $account, string $sessionId): array
+    {
+        return $this->unsupported('disconnectSession');
+    }
+
     public function getTrafficStatistics(VpnServer $server): array
     {
         return $this->unsupported('getTrafficStatistics');

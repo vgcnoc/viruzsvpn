@@ -31,6 +31,8 @@ interface ServerAdapter
 
     public function getActiveSessions(VpnServer $server): array;
 
+    public function disconnectSession(VpnServer $server, VpnAccount $account, string $sessionId): array;
+
     public function getTrafficStatistics(VpnServer $server): array;
 
     public function getSystemMetrics(VpnServer $server): array;

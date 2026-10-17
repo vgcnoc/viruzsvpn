@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\ServerController;
 use App\Http\Controllers\Api\VerifyEmailController;
 use App\Http\Controllers\Api\VpnAccountController;
+use App\Http\Controllers\Api\VpnMonitoringController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
@@ -30,6 +31,8 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::post('/billing/orders/{order}/confirm', [BillingController::class, 'confirm']);
     Route::post('/billing/orders/{order}/reject', [BillingController::class, 'reject']);
     Route::get('/dashboard', DashboardController::class);
+    Route::get('/monitoring', [VpnMonitoringController::class, 'index']);
+    Route::post('/monitoring/accounts/{account}/disconnect', [VpnMonitoringController::class, 'disconnect'])->middleware('throttle:20,1');
     Route::apiResource('servers', ServerController::class);
     Route::post('/servers/{server}/test', [ServerController::class, 'test']);
     Route::get('/servers/{server}/capabilities', [ServerController::class, 'capabilities']);

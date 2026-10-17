@@ -163,6 +163,45 @@ class VpnPlatformApiTest extends TestCase
             ->assertJsonPath('message', 'Administrator access is required.');
     }
 
+    public function test_monitoring_does_not_invent_offline_status_when_session_telemetry_is_unsupported(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $server = VpnServer::create([
+            'name' => 'Demo edge', 'adapter' => 'demo', 'hostname' => 'demo.invalid', 'port' => 443,
+            'capabilities' => ['protocols' => ['sstp']], 'is_demo' => true,
+        ]);
+        $account = VpnAccount::create([
+            'uuid' => 'b62a3504-6793-460c-8b73-67880171659f', 'vpn_server_id' => $server->id,
+            'protocol' => 'sstp', 'identifier' => 'monitor-client', 'status' => 'active',
+            'idempotency_key' => '42d6f0ae-e3c7-4cbe-977c-4473c01e9f0d',
+        ]);
+
+        $this->getJson('/api/monitoring')->assertOk()
+            ->assertJsonPath('summary.total', 1)
+            ->assertJsonPath('summary.offline', 0)
+            ->assertJsonPath('summary.unknown', 1)
+            ->assertJsonPath('accounts.data.0.connection', 'unknown')
+            ->assertJsonPath('servers.0.status', 'unsupported');
+        $this->getJson('/api/monitoring?state=unknown')->assertOk()->assertJsonPath('accounts.total', 1);
+        $this->getJson('/api/monitoring?state=offline')->assertOk()->assertJsonPath('accounts.total', 0);
+        $this->postJson('/api/monitoring/accounts/'.$account->id.'/disconnect', ['session_id' => '*1'])
+            ->assertUnprocessable();
+        $this->assertDatabaseHas('operation_logs', ['vpn_account_id' => $account->id, 'operation' => 'disconnect_session', 'status' => 'failed']);
+    }
+
+    public function test_customer_cannot_access_monitoring_or_disconnect_sessions(): void
+    {
+        Sanctum::actingAs(User::factory()->create(['role' => 'customer']));
+        $server = VpnServer::create(['name' => 'Demo edge', 'adapter' => 'demo', 'hostname' => 'demo.invalid', 'port' => 443]);
+        $account = VpnAccount::create([
+            'uuid' => 'db25dd0d-1322-4af7-82b2-520e60b78075', 'vpn_server_id' => $server->id,
+            'protocol' => 'sstp', 'identifier' => 'private-client', 'status' => 'active',
+            'idempotency_key' => '4333ae1e-bd57-4a2c-b0de-b037378a68c3',
+        ]);
+        $this->getJson('/api/monitoring')->assertForbidden();
+        $this->postJson('/api/monitoring/accounts/'.$account->id.'/disconnect', ['session_id' => '*1'])->assertForbidden();
+    }
+
     public function test_unauthenticated_api_requests_return_json_instead_of_a_missing_web_login_route(): void
     {
         $this->get('/api/servers')

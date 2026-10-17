@@ -10,6 +10,7 @@ import CustomerPortal from './CustomerPortal'
 import AdminBilling from './AdminBilling'
 import AdminCustomers from './AdminCustomers'
 import SstpClientSetup from './SstpClientSetup'
+import VpnMonitoring from './VpnMonitoring'
 import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './routeros.css'
 import './plans.css'
@@ -19,6 +20,7 @@ const nav = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
   { to: '/servers', label: 'Servers', icon: ServerCog },
   { to: '/accounts', label: 'Akun VPN', icon: UsersRound },
+  { to: '/monitoring', label: 'Monitoring VPN', icon: Activity },
   { to: '/customers', label: 'Pelanggan', icon: UsersRound },
   { to: '/plans', label: 'Paket VPN', icon: CircleDollarSign },
   { to: '/billing', label: 'Billing & invoice', icon: CircleDollarSign },
@@ -59,7 +61,7 @@ function App() {
     <main>
       <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle navigation"><Menu size={20} /></button><div className="crumb"><span>Control plane</span><ChevronRight size={14} /><b>Network operations</b></div><div className="topbar-actions"><span className="connection"><i /> API connected</span><button className="avatar" title="Administrator">A</button><button className="icon-button" aria-label="Sign out" onClick={signOut}><LogOut size={18} /></button></div></header>
       <section className="content"><Routes>
-        <Route path="/" element={<Overview />} /><Route path="/servers" element={<Servers />} /><Route path="/accounts" element={<Accounts />} /><Route path="/customers" element={<AdminCustomers />} /><Route path="/plans" element={<Plans />} /><Route path="/billing" element={<AdminBilling />} /><Route path="/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<Overview />} /><Route path="/servers" element={<Servers />} /><Route path="/accounts" element={<Accounts />} /><Route path="/monitoring" element={<VpnMonitoring />} /><Route path="/customers" element={<AdminCustomers />} /><Route path="/plans" element={<Plans />} /><Route path="/billing" element={<AdminBilling />} /><Route path="/settings" element={<Settings />} /><Route path="*" element={<Navigate to="/" replace />} />
       </Routes></section>
     </main>
   </div>

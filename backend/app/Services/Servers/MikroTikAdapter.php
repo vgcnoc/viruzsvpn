@@ -186,11 +186,37 @@ final class MikroTikAdapter extends AbstractAdapter
             $sessions = $this->client($server)->query(new Query('/ppp/active/print'))->read();
 
             return ['supported' => true, 'status' => 'success', 'data' => array_map(fn (array $row) => [
-                'identifier' => $row['name'] ?? null, 'service' => $row['service'] ?? null,
-                'address' => $row['address'] ?? null, 'uptime' => $row['uptime'] ?? null,
+                'id' => $row['.id'] ?? null, 'identifier' => $row['name'] ?? null,
+                'service' => $row['service'] ?? null, 'address' => $row['address'] ?? null,
+                'caller_id' => $row['caller-id'] ?? null, 'uptime' => $row['uptime'] ?? null,
             ], $sessions)];
         } catch (Throwable) {
             return $this->connectionFailure();
+        }
+    }
+
+    public function disconnectSession(VpnServer $server, VpnAccount $account, string $sessionId): array
+    {
+        $service = $this->pppService($account->protocol);
+        if ($service === null) {
+            return $this->unsupported('Disconnecting this VPN protocol');
+        }
+        try {
+            $client = $this->client($server);
+            $sessions = $client->query(new Query('/ppp/active/print'))->read();
+            $session = collect($sessions)->first(fn (array $row) =>
+                ($row['.id'] ?? null) === $sessionId
+                && ($row['name'] ?? null) === $account->identifier
+                && ($service === 'any' || ($row['service'] ?? null) === $service)
+            );
+            if (! $session) {
+                return ['supported' => true, 'status' => 'not_found', 'message' => 'Sesi akun ini sudah berakhir atau tidak cocok. Muat ulang monitoring.'];
+            }
+            $client->query((new Query('/ppp/active/remove'))->equal('.id', $sessionId))->read();
+
+            return ['supported' => true, 'status' => 'success', 'message' => 'Sesi RouterOS diputus. Akun tetap aktif.'];
+        } catch (Throwable) {
+            return $this->operationFailure();
         }
     }
 

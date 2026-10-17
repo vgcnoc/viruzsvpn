@@ -103,7 +103,7 @@ class VpnAccountController extends Controller
 
     public function show(VpnAccount $account)
     {
-        return $account->load(['server', 'plan', 'subscriptions.plan', 'operationLogs' => fn ($q) => $q->latest()]);
+        return $account->load(['server', 'plan', 'user:id,name,email', 'subscriptions.plan', 'operationLogs' => fn ($q) => $q->latest()]);
     }
 
     public function update(Request $request, VpnAccount $account, DriverFactory $drivers)
@@ -158,7 +158,7 @@ class VpnAccountController extends Controller
     {
         abort_unless(in_array($account->status, ['active', 'suspended'], true), 409, 'Only active or suspended accounts can be extended. Create a new account after expiry or revocation.');
         $data = $request->validate(['expires_at' => ['required', 'date', 'after:now'], 'notes' => ['nullable', 'string', 'max:1000']]);
-        $account->update(['expires_at' => $data['expires_at'], 'status' => 'active']);
+        $account->update(['expires_at' => $data['expires_at']]);
         if ($account->plan) {
             Subscription::create(['vpn_account_id' => $account->id, 'plan_id' => $account->plan_id, 'starts_at' => now(), 'expires_at' => $data['expires_at'], 'status' => 'active', 'amount_cents' => $account->plan->price_cents, 'currency' => $account->plan->currency, 'change_type' => 'renewal', 'notes' => $data['notes'] ?? null]);
         }
