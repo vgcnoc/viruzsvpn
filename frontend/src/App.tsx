@@ -225,7 +225,7 @@ ${allowInput('udp', 51820, 'WireGuard')}` : ''
 
 ${allowInput('tcp', 443, 'SSTP')}
 :if ([/interface sstp-server server get [find] disabled] = true) do={
-    /interface sstp-server server set [find] enabled=yes port=443 certificate=$certificateName default-profile=$vpnProfile authentication=mschap2 pfs=yes
+    /interface sstp-server server set enabled=yes port=443 certificate=$certificateName default-profile=$vpnProfile authentication=mschap2 pfs=yes
 } else={
     :put "virVPN: SSTP is already active; its global settings were left unchanged."
 }` : ''
@@ -236,23 +236,27 @@ ${allowInput('udp', 500, 'IPsec IKE')}
 ${allowInput('udp', 4500, 'IPsec NAT-T')}
 ${allowInput('ipsec-esp', null, 'IPsec ESP')}
 :if ([/interface l2tp-server server get [find] disabled] = true) do={
-    /interface l2tp-server server set [find] enabled=yes use-ipsec=required ipsec-secret=$l2tpSecret default-profile=$vpnProfile authentication=mschap2
+    /interface l2tp-server server set enabled=yes use-ipsec=required ipsec-secret=$l2tpSecret default-profile=$vpnProfile authentication=mschap2
 } else={
     :put "virVPN: L2TP is already active; its global settings were left unchanged."
 }` : ''
   const openVpnSection = has('openvpn') ? `
 
 ${allowInput('tcp', 1194, 'OpenVPN')}
-:if ([/interface ovpn-server server get [find] disabled] = true) do={
-    /interface ovpn-server server set [find] enabled=yes port=1194 mode=ip certificate=$certificateName default-profile=$vpnProfile require-client-certificate=no
-} else={
-    :put "virVPN: OpenVPN is already active; its global settings were left unchanged."
+:do {
+    :if ([/interface ovpn-server server get [find] disabled] = true) do={
+        /interface ovpn-server server set enabled=yes port=1194 mode=ip certificate=$certificateName default-profile=$vpnProfile require-client-certificate=no
+    } else={
+        :put "virVPN: OpenVPN is already active; its global settings were left unchanged."
+    }
+} on-error={
+    :put "virVPN: OpenVPN server is unavailable on this RouterOS; no OpenVPN service was changed."
 }` : ''
   const pptpSection = has('pptp') ? `
 
 ${allowInput('tcp', 1723, 'PPTP')}
 :if ([/interface pptp-server server get [find] disabled] = true) do={
-    /interface pptp-server server set [find] enabled=yes default-profile=$vpnProfile authentication=mschap2
+    /interface pptp-server server set enabled=yes default-profile=$vpnProfile authentication=mschap2
 } else={
     :put "virVPN: PPTP is already active; its global settings were left unchanged."
 }` : ''
