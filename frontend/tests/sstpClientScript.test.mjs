@@ -19,6 +19,7 @@ test('SSTP script verifies the CA and server without changing the default route'
   assert.match(script, /\/file add name="virvpn-ca-2026\.crt" type=file/)
   assert.match(script, /contents="-----BEGIN CERTIFICATE-----\\nMIIC/)
   assert.match(script, /\/certificate import file-name="virvpn-ca-2026\.crt"/)
+  assert.doesNotMatch(script, /\/certificate import[^;]*trusted=/, 'some RouterOS versions reject trusted= on import')
   assert.doesNotMatch(script, /^\s*\/tool fetch/m)
   assert.ok(script.includes(VIRVPN_CA_SHA256))
   assert.match(script, /verify-server-certificate=yes verify-server-address-from-certificate=yes/)

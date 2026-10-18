@@ -44,7 +44,7 @@ export function buildSstpClientScript(client: SstpClient): string {
   const prepareCa = `:if ([:len $caId] = 0) do=${block([
     `:if ([:len [/file find where name="virvpn-ca-2026.crt"]] = 0) do=${block(['/file add name="virvpn-ca-2026.crt" type=file'])}`,
     `/file set [find where name="virvpn-ca-2026.crt"] contents=${caContents}`,
-    '/certificate import file-name="virvpn-ca-2026.crt" trusted=no',
+    '/certificate import file-name="virvpn-ca-2026.crt"',
     `:set caId [/certificate find where fingerprint="${VIRVPN_CA_SHA256}"]`,
   ])}`
   const configureClient = `:if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do=${block([
