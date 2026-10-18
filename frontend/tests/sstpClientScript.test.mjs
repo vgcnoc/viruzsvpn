@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildSstpClientScript, usesSharedCertificateTrust, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
+import { buildSstpClientScript, buildUnverifiedSstpClientScript, usesSharedCertificateTrust, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
 
 const client = { id: 42, identifier: 'testsaja', host: 'vpn.viruzs.my.id', password: 'safe-password-123' }
 
@@ -51,4 +51,16 @@ test('RouterOS v6 and pre-7.21 scripts omit unsupported trust-store syntax', () 
   }
   assert.equal(usesSharedCertificateTrust('v7-scoped'), false)
   assert.throws(() => buildSstpClientScript(client, 'other'), /Pilih versi RouterOS/)
+})
+
+test('quick SSTP script creates a client without CA and never downgrades an existing interface', () => {
+  const script = buildUnverifiedSstpClientScript(client)
+  assert.equal(script.split(/\r?\n/).length, 1)
+  assert.ok(script.length < 800)
+  assert.match(script, /\/interface sstp-client add name="virvpn-sstp-42"/)
+  assert.match(script, /verify-server-certificate=no verify-server-address-from-certificate=no/)
+  assert.match(script, /add-default-route=no/)
+  assert.doesNotMatch(script, /\/certificate|\/file|\/interface sstp-client set/)
+  assert.match(script, /else=\{ :put "virVPN: interface sudah ada; tidak diubah\.";/)
+  assert.throws(() => buildUnverifiedSstpClientScript({ ...client, password: 'bad\npassword' }), /karakter kontrol/)
 })

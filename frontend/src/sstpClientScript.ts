@@ -32,6 +32,19 @@ function quote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`
 }
 
+export function buildUnverifiedSstpClientScript(client: SstpClient): string {
+  if (!Number.isInteger(client.id) || client.id < 1 || !/^[A-Za-z0-9._-]+$/.test(client.identifier)) {
+    throw new Error('Identitas akun VPN tidak valid.')
+  }
+  if (client.host !== VIRVPN_SSTP_HOST) throw new Error('Alamat server SSTP tidak sesuai.')
+  if (client.password.length < 8) throw new Error('Masukkan password VPN yang digunakan saat akun dibuat.')
+
+  const interfaceName = quote(`virvpn-sstp-${client.id}`)
+  const options = `name=${interfaceName} connect-to=${quote(client.host)} port=443 user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=no verify-server-address-from-certificate=no add-default-route=no disabled=no comment=${quote(`virVPN SSTP ${client.identifier}`)}`
+  // Only create. Never silently downgrade an existing verified interface.
+  return `:if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do={ /interface sstp-client add ${options}; :put "virVPN: SSTP client dibuat tanpa verifikasi sertifikat."; } else={ :put "virVPN: interface sudah ada; tidak diubah."; }; /interface sstp-client print detail where name=${interfaceName}`
+}
+
 export function buildSstpClientScript(client: SstpClient, target: RouterOsTarget): string {
   if (!['v6', 'v7-legacy', 'v7-scoped'].includes(target)) throw new Error('Pilih versi RouterOS client.')
   if (!Number.isInteger(client.id) || client.id < 1 || !/^[A-Za-z0-9._-]+$/.test(client.identifier)) {
