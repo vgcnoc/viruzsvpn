@@ -1,6 +1,24 @@
 export const VIRVPN_SSTP_HOST = 'vpn.viruzs.my.id'
 export const VIRVPN_CA_URL = 'https://vpn2.viruzs.my.id/viruzs-local-ca.crt'
 export const VIRVPN_CA_SHA256 = '8e8b8fbf230ada6f4ea26afbd25051dc82e9ba951c2cc3589785ad4cae3a9ee2'
+export const VIRVPN_CA_PEM = `-----BEGIN CERTIFICATE-----
+MIIC+DCCAeCgAwIBAgIIelBrT0CObB4wDQYJKoZIhvcNAQELBQAwGjEYMBYGA1UE
+AwwPVmlydXpzLUxvY2FsLUNBMB4XDTI2MTAxNzA4NTEyN1oXDTI3MTAxNzA4NTEy
+N1owGjEYMBYGA1UEAwwPVmlydXpzLUxvY2FsLUNBMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAu2FbR3VUps8F0+9IPxbsT6+7PHOC+zo4lWRbtSflCyTa
+/cva3JuXhyNAEydlXDw8Pt5+3VmZ2zVYqhQTY8bGUvBhWVchmZsTUpk18ugihyO5
+uhNcffW0blbmBleFG6J9w7c10ZuWXv/3/9ESwIOF2zUcn+jHh2lnSibXMK7hukQn
+lckeBVd5xdnXguYg+FprMaS/AL9GpBwjbaJTNVQBu/lLlNMPmMle/LrbDmlU/O3/
+bAzJOazW4MzTEMffcPgbeq6QNp8ENpYT/m7TmWJsazleHhVyGu2HIJlgS90cDil3
+fcgZu73cUq+Hboj9dNSq3U2TlpMKSN1pnSKsb9/94QIDAQABo0IwQDAPBgNVHRMB
+Af8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQU6xZxgNYqQESy2Dgc
+O/r2yW0D5F8wDQYJKoZIhvcNAQELBQADggEBAFzYexCqFvWJ9cm4kqaZcCuzCDbE
+MDes+h+nwBtpq4R06WTs2etGPfLlwelQQ5KHeBqcZZZNuQ11AGOVs7KcCymSg5Lz
+VkCkcPgX2MvjhFpPH4ZZM71SP0D5qKOEZ1j+VMXNtdTkt5XQAbhUyiQ1qKWzOYmM
+bCqpsYMaY3vBjPn+eMjwKbNhWOlY7QZ3zc5LIDCeHAFj/sOVl+BeAD3Uh9J081jq
+NI1fU2CfTB4/r9L/xukMN+bDh4MgFdV6yZWdkdOSRipf2v8Yj8yEVsvFz0gX1Hyp
+g8cC9bW5PLZk4Av+lOeEEAxcuFVPg4UGZkqREc2a4XnkWqYhnKF8RCn02cY=
+-----END CERTIFICATE-----`
 
 type SstpClient = { id: number; identifier: string; host: string; password: string }
 
@@ -18,29 +36,38 @@ export function buildSstpClientScript(client: SstpClient): string {
 
   const interfaceName = quote(`virvpn-sstp-${client.id}`)
   const comment = quote(`virVPN SSTP ${client.identifier}`)
+  const caContents = `"${VIRVPN_CA_PEM.replace(/\n/g, '\\n')}"`
+  const clientOptions = `connect-to=${quote(client.host)} port=443 user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=yes verify-server-address-from-certificate=yes add-default-route=no disabled=no comment=${comment}`
 
   return `# virVPN SSTP client untuk ${client.identifier}
 # Paste di Terminal MikroTik CLIENT, bukan di CHR server.
+# CA publik sudah tertanam di script; tidak perlu /tool fetch.
+# Password ada dalam script hasil copy. Jangan bagikan atau simpan di riwayat.
 # Script ini tidak mengganti default route router.
 
-:if ([:len [/certificate find where name="virvpn-client-ca"]] = 0) do={
-    /tool fetch url=${quote(VIRVPN_CA_URL)} dst-path="virvpn-client-ca.crt" check-certificate=yes-without-crl
-    /certificate import file-name="virvpn-client-ca.crt" name="virvpn-client-ca" trusted=no
-}
-:if ([:len [/certificate find where name="virvpn-client-ca"]] = 1) do={
-    :if ([/certificate get [find where name="virvpn-client-ca"] fingerprint] = "${VIRVPN_CA_SHA256}") do={
-        /certificate set [find where name="virvpn-client-ca"] trusted=yes trust-store=sstp
-        :if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do={
-            /interface sstp-client add name=${interfaceName} connect-to=${quote(client.host)} port=443 user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=yes verify-server-address-from-certificate=yes add-default-route=no disabled=no comment=${comment}
-            :put "virVPN: SSTP client dibuat. Periksa status running."
-        } else={
-            :put "virVPN: interface sudah ada; tidak diubah."
+:if (true) do={
+    :put "virVPN [1/3] Menyiapkan CA publik..."
+    :local caId [/certificate find where fingerprint="${VIRVPN_CA_SHA256}"]
+    :if ([:len $caId] = 0) do={
+        :if ([:len [/file find where name="virvpn-ca-2026.crt"]] = 0) do={
+            /file add name="virvpn-ca-2026.crt" type=file
         }
-    } else={
-        :error "virVPN: sidik jari CA tidak cocok; SSTP client tidak dibuat."
+        /file set [find where name="virvpn-ca-2026.crt"] contents=${caContents}
+        /certificate import file-name="virvpn-ca-2026.crt" trusted=no
+        :set caId [/certificate find where fingerprint="${VIRVPN_CA_SHA256}"]
     }
-} else={
-    :error "virVPN: sertifikat CA belum tersedia; SSTP client tidak dibuat."
-}
-/interface sstp-client print detail where name=${interfaceName}`
+    :if ([:len $caId] != 1) do={
+        :error "virVPN: fingerprint CA tidak cocok. SSTP tidak dibuat."
+    }
+    /certificate set $caId trusted=yes trust-store=sstp
+    :put "virVPN [2/3] Membuat atau memperbarui SSTP client..."
+    :if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do={
+        /interface sstp-client add name=${interfaceName} ${clientOptions}
+    } else={
+        /interface sstp-client set [find where name=${interfaceName}] ${clientOptions}
+    }
+    :put "virVPN [3/3] Status interface (R = running):"
+    /interface sstp-client print detail where name=${interfaceName}
+    :put "Jika belum R, periksa /log print where topics~\"sstp\""
+}`
 }

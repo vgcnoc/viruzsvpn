@@ -21,6 +21,7 @@ class VpnMonitoringController extends Controller
             'state' => ['nullable', 'in:all,online,offline,unknown,active,suspended,expiring,expired,pending,provisioning,failed,revoked'],
             'search' => ['nullable', 'string', 'max:128'],
             'page' => ['nullable', 'integer', 'min:1'],
+            'unmanaged_page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'between:10,100'],
         ]);
         $serverOptions = VpnServer::query()->orderBy('name')->get(['id', 'name']);
@@ -65,10 +66,17 @@ class VpnMonitoringController extends Controller
                 'expires_at' => $account->expires_at?->toIso8601String(), 'allocated_ip' => $account->allocated_ip,
             ];
         });
+        $matchedSessionKeys = $rows->flatMap(fn ($row) => collect($row['sessions'])
+            ->map(fn ($session) => $row['server']['id'].':'.($session['id'] ?? '')))->flip();
+        $serverNames = $servers->pluck('name', 'id');
+        $unmanaged = collect($sessionsByServer)->flatMap(fn ($sessions, $serverId) => collect($sessions)
+            ->filter(fn ($session) => ! $matchedSessionKeys->has($serverId.':'.($session['id'] ?? '')))
+            ->map(fn ($session) => array_merge($session, ['server_id' => $serverId, 'server_name' => $serverNames[$serverId] ?? 'Server'])))->values();
         $summary = [
             'total' => $rows->count(),
             'online' => $rows->where('connection', 'online')->count(),
             'sessions' => $rows->sum(fn ($row) => count($row['sessions'])),
+            'unmanaged_sessions' => $unmanaged->count(),
             'offline' => $rows->where('connection', 'offline')->where('status', 'active')->count(),
             'unknown' => $rows->where('connection', 'unknown')->count(),
             'suspended' => $rows->where('status', 'suspended')->count(),
@@ -92,8 +100,10 @@ class VpnMonitoringController extends Controller
         $paginator = new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, [
             'path' => $request->url(), 'query' => $request->query(),
         ]);
+        $unmanagedPage = (int) ($input['unmanaged_page'] ?? 1);
+        $unmanagedPaginator = new LengthAwarePaginator($unmanaged->forPage($unmanagedPage, 20)->values(), $unmanaged->count(), 20, $unmanagedPage);
 
-        return response()->json(['summary' => $summary, 'servers' => $serverChecks, 'server_options' => $serverOptions, 'accounts' => $paginator, 'checked_at' => now()->toIso8601String()]);
+        return response()->json(['summary' => $summary, 'servers' => $serverChecks, 'server_options' => $serverOptions, 'accounts' => $paginator, 'unmanaged_sessions' => $unmanagedPaginator, 'checked_at' => now()->toIso8601String()]);
     }
 
     public function disconnect(Request $request, VpnAccount $account, DriverFactory $drivers)

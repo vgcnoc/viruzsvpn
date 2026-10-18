@@ -9,6 +9,8 @@ Menu **Monitoring VPN** hanya tersedia untuk administrator. Halaman meminta sesi
 
 Saat ini RouterOS melaporkan sesi PPP untuk L2TP/IPsec, SSTP, OpenVPN, dan PPTP melalui `/ppp/active/print`. WireGuard dan adapter lain tetap ditampilkan sebagai **Tidak diketahui** sampai telemetri handshake/peer yang dapat dipercaya ditambahkan; sistem tidak membuat angka online palsu.
 
+Sesi aktif yang tidak cocok dengan akun terdaftar tetap ditampilkan di **Sesi belum terkelola** (20 per halaman). Ini mencakup akun RouterOS lama yang dibuat di luar virVPN atau nama/protokol yang belum cocok. Bagian ini hanya untuk observasi dan tidak menawarkan aksi pemutusan, agar sesi pihak lain tidak terputus tanpa kepemilikan akun yang jelas.
+
 Aksi administrator:
 
 - **Putuskan sesi**: membaca ulang sesi dari RouterOS, memastikan ID sesi, username, dan protokol cocok dengan akun terkelola, lalu menghapus sesi itu saja. Akun tetap aktif dan client bisa menyambung lagi.

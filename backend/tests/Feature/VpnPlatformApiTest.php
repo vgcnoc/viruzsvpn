@@ -180,6 +180,7 @@ class VpnPlatformApiTest extends TestCase
             ->assertJsonPath('summary.total', 1)
             ->assertJsonPath('summary.offline', 0)
             ->assertJsonPath('summary.unknown', 1)
+            ->assertJsonPath('summary.unmanaged_sessions', 0)
             ->assertJsonPath('accounts.data.0.connection', 'unknown')
             ->assertJsonPath('servers.0.status', 'unsupported');
         $this->getJson('/api/monitoring?state=unknown')->assertOk()->assertJsonPath('accounts.total', 1);
