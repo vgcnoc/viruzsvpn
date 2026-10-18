@@ -1,7 +1,7 @@
 import { Check, Copy, Download, ShieldCheck, X } from 'lucide-react'
 import { useState } from 'react'
 import type { Account } from './api'
-import { buildSstpClientScript, buildUnverifiedSstpClientScript, usesSharedCertificateTrust, VIRVPN_CA_SHA256, VIRVPN_CA_URL } from './sstpClientScript'
+import { buildSstpClientScript, buildUnverifiedSstpClientScript, defaultSstpSetupMode, usesSharedCertificateTrust, VIRVPN_CA_SHA256, VIRVPN_CA_URL } from './sstpClientScript'
 import type { RouterOsTarget } from './sstpClientScript'
 import './sstp-client.css'
 
@@ -15,23 +15,25 @@ export default function SstpClientSetup({ account, close }: { account: Account; 
   const [error, setError] = useState('')
   const details = { id: account.id, identifier: account.identifier, host: account.server.hostname }
   const sharedTrust = setupMode === 'verified' && routerOsTarget !== '' && usesSharedCertificateTrust(routerOsTarget)
-  const preview = setupMode === 'unverified'
+  const unverifiedNeedsConsent = setupMode === 'unverified' && routerOsTarget !== 'v6'
+  const preview = routerOsTarget && setupMode === 'unverified'
     ? buildUnverifiedSstpClientScript({ ...details, password: '********' })
     : setupMode === 'verified' && routerOsTarget
       ? buildSstpClientScript({ ...details, password: '********' }, routerOsTarget)
       : ''
-  const canCopy = password.length >= 8 && (setupMode === 'unverified'
-    ? unverifiedAccepted
-    : setupMode === 'verified' && !!routerOsTarget && (!sharedTrust || legacyTrustAccepted))
+  const canCopy = password.length >= 8 && !!routerOsTarget && (setupMode === 'unverified'
+    ? !unverifiedNeedsConsent || unverifiedAccepted
+    : setupMode === 'verified' && (!sharedTrust || legacyTrustAccepted))
 
   async function copyScript() {
     try {
+      if (!routerOsTarget) throw new Error('Pilih versi RouterOS client terlebih dahulu.')
       let script: string
       if (setupMode === 'unverified') {
-        if (!unverifiedAccepted) throw new Error('Konfirmasi risiko SSTP tanpa verifikasi sertifikat.')
+        if (unverifiedNeedsConsent && !unverifiedAccepted) throw new Error('Konfirmasi risiko SSTP tanpa verifikasi sertifikat.')
         script = buildUnverifiedSstpClientScript({ ...details, password })
       } else {
-        if (setupMode !== 'verified' || !routerOsTarget) throw new Error('Pilih metode dan versi RouterOS client terlebih dahulu.')
+        if (setupMode !== 'verified') throw new Error('Pilih metode pemasangan terlebih dahulu.')
         if (sharedTrust && !legacyTrustAccepted) throw new Error('Konfirmasi risiko CA tepercaya untuk seluruh layanan router.')
         script = buildSstpClientScript({ ...details, password }, routerOsTarget)
       }
@@ -62,10 +64,10 @@ export default function SstpClientSetup({ account, close }: { account: Account; 
     <section className="modal sstp-setup-modal" role="dialog" aria-modal="true" aria-label={`Script MikroTik client ${account.identifier}`} onMouseDown={event => event.stopPropagation()}>
       <div className="modal-title"><h2>Script MikroTik client</h2><button className="icon-button" aria-label="Tutup" onClick={close}><X size={18} /></button></div>
       <div className="sstp-setup-intro"><ShieldCheck size={20} /><p>Paste script di <b>router MikroTik client</b>, bukan di CHR Sukabumi BC1. Script membuat koneksi SSTP untuk <b>{account.identifier}</b> ke <b>{account.server.hostname}:443</b> tanpa mengubah default route.</p></div>
-      <label className="sstp-password">Metode pemasangan<select value={setupMode} onChange={event => { setSetupMode(event.target.value as '' | 'verified' | 'unverified'); setLegacyTrustAccepted(false); setUnverifiedAccepted(false); setCopied(false); setError('') }}><option value="">Pilih metode</option><option value="verified">Dengan verifikasi sertifikat (disarankan)</option><option value="unverified">Langsung buat SSTP client tanpa CA (tidak aman)</option></select></label>
-      {setupMode === 'verified' && <label className="sstp-password">Versi RouterOS pada router client<select value={routerOsTarget} onChange={event => { setRouterOsTarget(event.target.value as RouterOsTarget | ''); setLegacyTrustAccepted(false); setCopied(false); setError('') }}><option value="">Pilih versi RouterOS</option><option value="v6">RouterOS v6</option><option value="v7-legacy">RouterOS v7.0–v7.20</option><option value="v7-scoped">RouterOS v7.21 atau lebih baru</option></select><small>Periksa dengan <code>/system resource print</code> pada router client, bukan pada CHR server.</small></label>}
+      <label className="sstp-password">Versi RouterOS pada router client<select value={routerOsTarget} onChange={event => { const target = event.target.value as RouterOsTarget | ''; setRouterOsTarget(target); setSetupMode(defaultSstpSetupMode(target)); setLegacyTrustAccepted(false); setUnverifiedAccepted(false); setCopied(false); setError('') }}><option value="">Pilih versi RouterOS</option><option value="v6">RouterOS v6.x</option><option value="v7-legacy">RouterOS v7.0–v7.20</option><option value="v7-scoped">RouterOS v7.21 atau lebih baru</option></select><small>Periksa dengan <code>/system resource print</code> pada router client, bukan pada CHR server.</small></label>
+      {routerOsTarget && <label className="sstp-password">Metode pemasangan<select value={setupMode} onChange={event => { setSetupMode(event.target.value as '' | 'verified' | 'unverified'); setLegacyTrustAccepted(false); setUnverifiedAccepted(false); setCopied(false); setError('') }}><option value="verified">Dengan CA · verifikasi sertifikat server</option><option value="unverified">Tanpa CA · sertifikat server tidak diverifikasi</option></select></label>}
       {sharedTrust && <div className="sstp-trust-warning" role="note"><strong>Perhatian untuk RouterOS sebelum v7.21</strong><p>Versi ini tidak mendukung pembatasan CA hanya untuk SSTP. Jika script dijalankan, CA virVPN akan dipercaya oleh seluruh layanan router yang menggunakan sertifikat. <a href="https://mikrotik.com/supportsec/cve-2025-42611/" target="_blank" rel="noreferrer">Baca penjelasan MikroTik</a>. Periksa CA dan layanan sertifikat lain pada router sebelum melanjutkan.</p><label><input type="checkbox" checked={legacyTrustAccepted} onChange={event => setLegacyTrustAccepted(event.target.checked)} /> Saya memahami dan menyetujui CA virVPN dipercaya secara umum pada router client ini.</label></div>}
-      {setupMode === 'unverified' && <div className="sstp-trust-warning sstp-unsafe-warning" role="alert"><strong>Tanpa verifikasi identitas server</strong><p>Script singkat ini tidak memasang CA, tetapi mengatur <code>verify-server-certificate=no</code>. Koneksi dapat diarahkan ke server palsu (man-in-the-middle). Gunakan hanya jika Anda menerima risiko ini; jangan gunakan untuk trafik sensitif. <a href="https://help.mikrotik.com/docs/spaces/ROS/pages/2031645/SSTP" target="_blank" rel="noreferrer">Penjelasan MikroTik</a>.</p><label><input type="checkbox" checked={unverifiedAccepted} onChange={event => setUnverifiedAccepted(event.target.checked)} /> Saya memahami bahwa SSTP client ini tidak memverifikasi sertifikat server.</label></div>}
+      {unverifiedNeedsConsent && <div className="sstp-trust-warning sstp-unsafe-warning" role="alert"><strong>Tanpa verifikasi identitas server</strong><p>Script singkat ini tidak memasang CA, tetapi mengatur <code>verify-server-certificate=no</code>. Koneksi dapat diarahkan ke server palsu (man-in-the-middle). Gunakan hanya jika Anda menerima risiko ini; jangan gunakan untuk trafik sensitif. <a href="https://help.mikrotik.com/docs/spaces/ROS/pages/2031645/SSTP" target="_blank" rel="noreferrer">Penjelasan MikroTik</a>.</p><label><input type="checkbox" checked={unverifiedAccepted} onChange={event => setUnverifiedAccepted(event.target.checked)} /> Saya memahami bahwa SSTP client ini tidak memverifikasi sertifikat server.</label></div>}
       <label className="sstp-password">Password VPN akun {account.identifier}<input type="password" minLength={8} maxLength={255} autoComplete="off" value={password} onChange={event => { setPassword(event.target.value); setCopied(false); setError('') }} placeholder="Password saat akun VPN dibuat" /><small>Password tidak bisa diambil ulang dari aplikasi. Masukkan password yang Anda buat saat provisioning; hanya dipakai untuk script yang disalin.</small></label>
       {setupMode === 'verified' && <div className="sstp-ca-note"><span>CA sudah disertakan dalam script · SHA-256 <code>{VIRVPN_CA_SHA256}</code></span><a href={VIRVPN_CA_URL} target="_blank" rel="noreferrer"><Download size={14} /> Unduh CA manual</a></div>}
       <label className="sstp-preview-label">Pratinjau perintah · generator revisi 7 (password disamarkan)<textarea readOnly spellCheck={false} value={preview} placeholder="Pilih metode untuk melihat script." rows={setupMode === 'unverified' ? 5 : 12} /></label>

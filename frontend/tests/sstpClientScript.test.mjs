@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildSstpClientScript, buildUnverifiedSstpClientScript, usesSharedCertificateTrust, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
+import { buildSstpClientScript, buildUnverifiedSstpClientScript, defaultSstpSetupMode, usesSharedCertificateTrust, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
 
 const client = { id: 42, identifier: 'testsaja', host: 'vpn.viruzs.my.id', password: 'safe-password-123' }
 
@@ -65,4 +65,11 @@ test('quick SSTP script creates a client without CA and never downgrades an exis
   assert.doesNotMatch(script, /\/certificate|\/file|\/interface sstp-client set/)
   assert.match(script, /else=\{ :put "virVPN: interface sudah ada; tidak diubah\.";/)
   assert.throws(() => buildUnverifiedSstpClientScript({ ...client, password: 'bad\npassword' }), /karakter kontrol/)
+})
+
+test('RouterOS v6 defaults to direct SSTP while newer versions default to CA verification', () => {
+  assert.equal(defaultSstpSetupMode(''), '')
+  assert.equal(defaultSstpSetupMode('v6'), 'unverified')
+  assert.equal(defaultSstpSetupMode('v7-legacy'), 'verified')
+  assert.equal(defaultSstpSetupMode('v7-scoped'), 'verified')
 })

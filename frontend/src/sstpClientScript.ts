@@ -27,6 +27,10 @@ export function usesSharedCertificateTrust(target: RouterOsTarget): boolean {
   return target === 'v6' || target === 'v7-legacy'
 }
 
+export function defaultSstpSetupMode(target: RouterOsTarget | ''): '' | 'verified' | 'unverified' {
+  return target === 'v6' ? 'unverified' : target ? 'verified' : ''
+}
+
 function quote(value: string): string {
   if (/[\x00-\x1f\x7f]/.test(value)) throw new Error('Password tidak boleh berisi karakter kontrol atau baris baru.')
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`
