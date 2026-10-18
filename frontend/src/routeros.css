@@ -206,3 +206,9 @@
 @media (max-width: 560px) {
   .customer-header { height: 67px; padding: 0 17px; }.customer-header > div:last-child span { display: none; }.customer-content { width: calc(100% - 34px); padding: 66px 0; }.customer-content h1 { letter-spacing: -1.8px; }.customer-intro { font-size: 13px; }.customer-ready { padding: 17px; }
 }
+.remote-access-modal { width: min(760px, 100%); }
+.remote-lan-backdrop { z-index: 90; }
+.remote-access-modal .script-output { margin-top: 16px; }
+.remote-ip-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.remote-ip-form input { min-width: 210px; min-height: 36px; padding: 8px 10px; color: #dbe9f2; background: #0a1522; border: 1px solid #263b50; border-radius: 6px; }
+.remote-ip-form .field-error { width: 100%; }

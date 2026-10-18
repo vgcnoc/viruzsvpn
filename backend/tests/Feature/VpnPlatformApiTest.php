@@ -120,8 +120,10 @@ class VpnPlatformApiTest extends TestCase
         $payload = [
             'vpn_server_id' => $server->id, 'protocol' => 'sstp', 'identifier' => 'client-one',
             'expires_at' => now()->addDays(30)->toISOString(), 'credentials' => ['password' => 'very-secure-password'],
+            'remote_target_port' => 8291,
+            'remote_service' => 'mikrotik',
         ];
-        $this->postJson('/api/accounts', $payload)->assertStatus(202)->assertJsonPath('status', 'pending');
+        $this->postJson('/api/accounts', $payload)->assertStatus(202)->assertJsonPath('status', 'pending')->assertJsonPath('remote_target_port', 8291);
         Queue::assertPushed(ProvisionVpnAccount::class);
         $this->assertDatabaseCount('vpn_accounts', 1);
         $this->postJson('/api/accounts', $payload)->assertUnprocessable();
@@ -161,6 +163,43 @@ class VpnPlatformApiTest extends TestCase
         $this->getJson('/api/dashboard')
             ->assertForbidden()
             ->assertJsonPath('message', 'Administrator access is required.');
+    }
+
+    public function test_routeros_remote_access_requires_a_stable_ip_unique_port_and_restricted_source(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+        $server = VpnServer::create([
+            'name' => 'Remote CHR', 'adapter' => 'mikrotik-routeros', 'hostname' => 'vpn.example.test',
+            'port' => 8729, 'capabilities' => ['protocols' => ['sstp']],
+        ]);
+        $first = VpnAccount::create([
+            'uuid' => 'f28e8bd4-864f-42e4-bf2a-8d193a49a26d', 'vpn_server_id' => $server->id,
+            'protocol' => 'sstp', 'identifier' => 'first-router', 'status' => 'active',
+            'allocated_ip' => '10.250.20.10', 'idempotency_key' => '3aabf879-9242-485f-b2c5-d3bf5a01109c',
+        ]);
+        $second = VpnAccount::create([
+            'uuid' => '888e8bd4-864f-42e4-bf2a-8d193a49a26d', 'vpn_server_id' => $server->id,
+            'protocol' => 'sstp', 'identifier' => 'second-router', 'status' => 'active',
+            'allocated_ip' => '10.250.20.11', 'idempotency_key' => '4aabf879-9242-485f-b2c5-d3bf5a01109c',
+        ]);
+        $mapping = [
+            'remote_public_port' => 28291, 'remote_target_port' => 8291,
+            'remote_service' => 'mikrotik',
+            'remote_allowed_cidr' => '203.0.113.10/32', 'remote_wan_interface' => 'ether1',
+            'remote_gateway_ip' => '10.250.20.1',
+        ];
+
+        $this->putJson('/api/accounts/'.$first->id.'/remote-access', $mapping)
+            ->assertOk()->assertJsonPath('remote_public_port', 28291)->assertJsonPath('remote_target_port', 8291);
+        $this->putJson('/api/accounts/'.$second->id.'/remote-access', $mapping)
+            ->assertUnprocessable()->assertJsonValidationErrors('remote_public_port');
+        $this->putJson('/api/accounts/'.$second->id.'/remote-access', [
+            ...$mapping, 'remote_public_port' => 28292, 'remote_allowed_cidr' => '0.0.0.0/0',
+        ])->assertUnprocessable()->assertJsonValidationErrors('remote_allowed_cidr');
+        $this->putJson('/api/accounts/'.$second->id.'/remote-access', [
+            ...$mapping, 'remote_public_port' => 28292, 'remote_gateway_ip' => $second->allocated_ip,
+        ])->assertUnprocessable();
+        $this->assertDatabaseHas('vpn_accounts', ['id' => $first->id, 'remote_public_port' => 28291]);
     }
 
     public function test_monitoring_does_not_invent_offline_status_when_session_telemetry_is_unsupported(): void

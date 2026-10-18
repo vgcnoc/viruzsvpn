@@ -10,6 +10,7 @@ class VpnOrder extends Model
     protected $fillable = [
         'invoice_number', 'user_id', 'plan_id', 'vpn_server_id', 'vpn_account_id', 'type',
         'protocol', 'identifier', 'encrypted_client_password', 'status', 'amount_cents',
+        'remote_target_port', 'remote_service', 'client_device_type', 'remote_device_ip',
         'currency', 'plan_name', 'duration_days', 'payment_reference', 'payment_note',
         'admin_note', 'payment_due_at', 'submitted_at', 'paid_at',
         'payment_bank_name', 'payment_account_name', 'payment_account_number', 'payment_instructions',
@@ -19,7 +20,8 @@ class VpnOrder extends Model
 
     protected function casts(): array
     {
-        return ['payment_due_at' => 'datetime', 'submitted_at' => 'datetime', 'paid_at' => 'datetime'];
+        return ['payment_due_at' => 'datetime', 'submitted_at' => 'datetime', 'paid_at' => 'datetime',
+            'remote_target_port' => 'integer'];
     }
 
     public function user(): BelongsTo { return $this->belongsTo(User::class); }

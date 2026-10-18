@@ -52,9 +52,12 @@ class CustomerBillingTest extends TestCase
         $response = $this->postJson('/api/customer/orders', [
             'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
             'protocol' => 'l2tp-ipsec', 'identifier' => 'customer-001',
-            'client_password' => 'unique-vpn-password-123',
+            'client_password' => 'unique-vpn-password-123', 'client_device_type' => 'mikrotik',
+            'remote_service' => 'olt', 'remote_target_port' => 80, 'remote_device_ip' => '192.168.88.10',
         ]);
-        $response->assertCreated()->assertJsonPath('status', 'pending_payment')->assertJsonMissingPath('encrypted_client_password');
+        $response->assertCreated()->assertJsonPath('status', 'pending_payment')->assertJsonPath('remote_service', 'olt')
+            ->assertJsonPath('remote_target_port', 80)->assertJsonPath('remote_device_ip', '192.168.88.10')
+            ->assertJsonMissingPath('encrypted_client_password');
         $orderId = $response->json('id');
         $this->assertDatabaseCount('vpn_accounts', 0);
         Queue::assertNothingPushed();
@@ -71,6 +74,10 @@ class CustomerBillingTest extends TestCase
         $this->postJson("/api/billing/orders/$orderId/confirm")->assertStatus(409);
         $account = VpnAccount::query()->sole();
         $this->assertSame($customer->id, $account->user_id);
+        $this->assertSame('olt', $account->remote_service);
+        $this->assertSame('mikrotik', $account->client_device_type);
+        $this->assertSame(80, $account->remote_target_port);
+        $this->assertSame('192.168.88.10', $account->remote_device_ip);
         $this->assertSame('unique-vpn-password-123', Crypt::decryptString($account->encrypted_provisioning_secret));
         $this->assertDatabaseCount('subscriptions', 1);
         $this->assertDatabaseHas('subscriptions', ['vpn_account_id' => $account->id, 'status' => 'pending_activation']);
@@ -93,6 +100,21 @@ class CustomerBillingTest extends TestCase
             'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
             'protocol' => 'sstp', 'identifier' => 'client-1', 'client_password' => 'unique-vpn-password-123',
         ])->assertUnprocessable();
+        $this->postJson('/api/customer/orders', [
+            'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
+            'protocol' => 'l2tp-ipsec', 'identifier' => 'client-1', 'client_password' => 'unique-vpn-password-123',
+            'remote_service' => 'mikrotik', 'remote_target_port' => 65536,
+        ])->assertUnprocessable()->assertJsonValidationErrors('remote_target_port');
+        $this->postJson('/api/customer/orders', [
+            'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
+            'protocol' => 'l2tp-ipsec', 'identifier' => 'client-1', 'client_password' => 'unique-vpn-password-123',
+            'remote_service' => 'olt', 'remote_target_port' => 80,
+        ])->assertUnprocessable()->assertJsonValidationErrors('remote_device_ip');
+        $this->postJson('/api/customer/orders', [
+            'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
+            'protocol' => 'l2tp-ipsec', 'identifier' => 'cctv-1', 'client_password' => 'unique-vpn-password-123',
+            'client_device_type' => 'cctv', 'remote_service' => 'cctv', 'remote_target_port' => 80,
+        ])->assertCreated()->assertJsonPath('client_device_type', 'cctv')->assertJsonPath('remote_service', 'cctv');
         $customer->forceFill(['email_verified_at' => null])->save();
         $this->getJson('/api/customer/catalog')->assertForbidden();
     }

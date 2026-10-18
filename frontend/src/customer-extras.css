@@ -1,1 +1,4 @@
 .cp-secret-note{display:block;margin-top:7px;color:#a8d9db!important}.cp-secret-note code{display:inline-block;user-select:all;padding:3px 6px;border-radius:5px;background:#173d44;color:#d8fcf7;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.cp-form .cp-remote-choice { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border: 1px solid #315067; border-radius: 7px; background: #0b1d2d; color: #c6e2e5; }
+.cp-form .cp-remote-choice input { width: 15px; min-height: 15px; height: 15px; margin: 0; accent-color: #50d9d0; }
+.cp-form label small { color: #7897a8; font-weight: 400; line-height: 1.5; }

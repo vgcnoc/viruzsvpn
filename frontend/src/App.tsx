@@ -10,6 +10,10 @@ import CustomerPortal from './CustomerPortal'
 import AdminBilling from './AdminBilling'
 import AdminCustomers from './AdminCustomers'
 import SstpClientSetup from './SstpClientSetup'
+import RouterOsRemoteAccess from './RouterOsRemoteAccess'
+import { buildRouterOsRemoteScript } from './routerOsRemoteScript'
+import { remoteService, remoteServices } from './remoteServices'
+import { clientDevice, clientDevices } from './clientDevices'
 import VpnMonitoring from './VpnMonitoring'
 import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './routeros.css'
@@ -340,7 +344,28 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
       }
       return server ? api.put(`/servers/${server.id}`, payload) : api.post('/servers', payload)
     },
-    onSuccess: (_, value) => value.adapter === 'mikrotik-routeros' ? setBootstrapScript(buildRouterOsBootstrap(value)) : onSuccess(),
+    onSuccess: async (_, value) => {
+      if (value.adapter !== 'mikrotik-routeros') { onSuccess(); return }
+      let script = buildRouterOsBootstrap(value)
+      if (server) {
+        try {
+          const remoteAccounts: Account[] = []
+          let page = 1
+          let lastPage = 1
+          do {
+            const response = await api.get<Page<Account>>('/accounts', { params: { server_id: server.id, per_page: 100, page } })
+            remoteAccounts.push(...response.data.data)
+            lastPage = response.data.last_page
+            page += 1
+          } while (page <= lastPage)
+          const mappings = remoteAccounts.filter(account => account.status === 'active' && account.remote_public_port)
+          if (mappings.length) script += `\n\n# Remote access rules for ${mappings.length} active client account(s).\n${mappings.map(buildRouterOsRemoteScript).join('\n\n')}`
+        } catch {
+          script += '\n\n# Remote account mappings could not be loaded. Generate them from each VPN account detail instead.'
+        }
+      }
+      setBootstrapScript(script)
+    },
   })
   const submit = (value: ServerValues) => {
     if (requiresRouterOsBootstrap && !value.routeros_allowed_cidr) { setError('routeros_allowed_cidr', { message: 'Required to restrict RouterOS API access.' }); return }
@@ -356,7 +381,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
     catch { setCopyMessage('Clipboard access was blocked. Select the script and copy it manually.') }
   }
   if (bootstrapScript) return <Modal title="RouterOS deployment script" close={finishBootstrap}>
-    <p className="form-help">The script creates the selected virVPN services, profile, pool, firewall rules, NAT rule, and—when credentials were entered—the restricted API user. It can contain passwords and the L2TP/IPsec secret; keep it out of chat logs.</p>
+    <p className="form-help">The script creates the selected virVPN services, profile, pool, firewall rules, NAT rule, and—when credentials were entered—the restricted API user. On an existing server it also includes saved, active per-client remote port mappings. New accounts get their remote mapping from Akun VPN → Detail. It can contain passwords and the L2TP/IPsec secret; keep it out of chat logs.</p>
     <p className="script-warning">Review the WAN interface and client subnet first. Existing active VPN service settings are left unchanged, so current customers are not interrupted.</p>
     <textarea className="script-output" readOnly aria-label="RouterOS deployment script" value={bootstrapScript} rows={28} />
     <p className="form-help">New PPP accounts created by virVPN will use <span className="mono">{watch('routeros_ppp_profile')}</span>. WireGuard creates the server interface only; client peers are added separately.</p>
@@ -417,19 +442,28 @@ function Accounts() {
 
 function AccountDetails({ accountId, close }: { accountId: number; close: () => void }) {
   const [showClientScript, setShowClientScript] = useState(false)
+  const [showRemoteAccess, setShowRemoteAccess] = useState(false)
+  const [staticIp, setStaticIp] = useState('')
+  const client = useQueryClient()
+  const assignIp = useMutation({ mutationFn: () => api.put(`/accounts/${accountId}`, { allocated_ip: staticIp.trim() }), onSuccess: () => { setStaticIp(''); void client.invalidateQueries({ queryKey: ['account', accountId] }); void client.invalidateQueries({ queryKey: ['accounts'] }) } })
   const query = useQuery({ queryKey: ['account', accountId], queryFn: () => api.get<Account & { provisioning_error?: string; operation_logs: Array<{ id: number; operation: string; status: string; message?: string; created_at: string }> }>(`/accounts/${accountId}`).then((r) => r.data), refetchInterval: result => ['pending', 'provisioning'].includes(result.state.data?.status ?? '') ? 5000 : false })
   const account = query.data
   return <>
     <Modal title={account ? `Akun: ${account.identifier}` : 'Detail akun'} close={close}>
       {query.isLoading ? <Skeleton rows={4} /> : account ? <div className="activity-list">
         {account.provisioning_error && <div className="notice error"><Activity size={16} />{account.provisioning_error}</div>}
-        <div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>
-        {account.status === 'active' && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST &&
+        <div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)} · perangkat VPN {clientDevice(account.client_device_type)?.label ?? 'belum ditentukan'}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>
+        {account.status === 'active' && (!account.client_device_type || account.client_device_type === 'mikrotik') && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST &&
           <div className="account-client-action"><p>Gunakan akun ini pada router MikroTik client. Password VPN tidak tersimpan setelah aktivasi, jadi masukkan kembali saat membuat script.</p><button className="button primary" type="button" onClick={() => setShowClientScript(true)}><Copy size={15} /> Generate script MikroTik client</button></div>}
+        {account.server?.adapter === 'mikrotik-routeros' && ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'].includes(account.protocol) && (account.status === 'active' || Boolean(account.remote_public_port)) &&
+          <div className="account-client-action"><p>Remote {remoteService(account.remote_service)?.label ?? 'perangkat'} melalui CHR. {account.remote_public_port ? `Port publik ${account.remote_public_port} → ${account.allocated_ip}:${account.remote_target_port}.` : account.remote_target_port ? `Pelanggan meminta port tujuan TCP ${account.remote_target_port}${account.remote_device_ip ? ` ke ${account.remote_device_ip}` : ''}; tetapkan IP tunnel statis dan port publik.` : 'Perlu IP tunnel statis dan port publik yang belum dipakai.'}</p>
+            {account.status === 'active' && !account.allocated_ip && <form className="remote-ip-form" onSubmit={event => { event.preventDefault(); assignIp.mutate() }}><input aria-label="IP tunnel statis" value={staticIp} onChange={event => setStaticIp(event.target.value)} placeholder="IP tunnel statis, contoh 10.250.20.10" required /><button className="button quiet" type="submit" disabled={assignIp.isPending}>Tetapkan IP statis</button>{assignIp.isError && <small className="field-error">{apiError(assignIp.error)}</small>}</form>}
+            {(account.allocated_ip || account.remote_public_port) && <button className="button quiet" type="button" onClick={() => setShowRemoteAccess(true)}><Copy size={15} />{account.remote_public_port ? 'Lihat script dst-NAT CHR' : 'Atur port & generate script CHR'}</button>}</div>}
         {account.operation_logs.length ? account.operation_logs.map(log => <div className="activity" key={log.id}><span className="activity-icon"><Activity size={15} /></span><div><b>{log.operation.replaceAll('_', ' ')}</b><p>{log.message ?? 'Tanpa keterangan tambahan'} · {new Date(log.created_at).toLocaleString('id-ID')}</p></div><span className={statusClass(log.status)}>{log.status}</span></div>) : <Empty icon={<Activity />} title="Belum ada aktivitas" description="Hasil provisioning dan perubahan akun akan tampil di sini." />}
       </div> : <p className="form-error">Detail akun tidak dapat dimuat.</p>}
     </Modal>
     {showClientScript && account && <SstpClientSetup account={account} close={() => setShowClientScript(false)} />}
+    {showRemoteAccess && account && <RouterOsRemoteAccess account={account} close={() => setShowRemoteAccess(false)} />}
   </>
 }
 
@@ -437,6 +471,8 @@ function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (acco
   const [serverId, setServerId] = useState('')
   const [protocol, setProtocol] = useState('')
   const [planId, setPlanId] = useState('')
+  const [remoteType, setRemoteType] = useState('')
+  const [remoteTargetPort, setRemoteTargetPort] = useState('')
   const [error, setError] = useState('')
   const servers = useQuery({ queryKey: ['account-form-servers'], queryFn: () => api.get<Page<Server>>('/servers?per_page=100').then(r => r.data) })
   const plans = useQuery({ queryKey: ['plans'], queryFn: () => api.get<Page<Plan>>('/plans?per_page=100').then(r => r.data) })
@@ -452,6 +488,10 @@ function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (acco
         vpn_server_id: Number(serverId), plan_id: planId ? Number(planId) : undefined,
         protocol: chosenProtocol, identifier: String(form.get('identifier')).trim(),
         allocated_ip: form.get('allocated_ip') || undefined,
+        remote_service: remoteType || undefined,
+        client_device_type: form.get('client_device_type') || undefined,
+        remote_target_port: remoteType ? Number(remoteTargetPort) : undefined,
+        remote_device_ip: remoteType && form.get('remote_device_ip') ? String(form.get('remote_device_ip')).trim() : undefined,
         wireguard_public_key: form.get('wireguard_public_key') || undefined,
         credentials: form.get('client_password') ? { password: form.get('client_password') } : undefined,
         expires_at: planId ? undefined : new Date(Date.now() + days * 86_400_000).toISOString(),
@@ -467,10 +507,15 @@ function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (acco
     {selected?.adapter === 'mikrotik-routeros' && chosenProtocol === 'pptp' && <p className="form-error span-2">PPTP adalah protokol lama dan tidak direkomendasikan untuk pelanggan baru.</p>}
     <label>Username VPN<input name="identifier" required pattern="[A-Za-z0-9._-]+" maxLength={128} placeholder="client-001" autoComplete="off" /></label>
     <label>Paket (opsional)<select name="plan_id" value={planId} onChange={event => setPlanId(event.target.value)}><option value="">Tanpa paket / manual</option>{eligiblePlans.map(plan => <option value={plan.id} key={plan.id}>{plan.name} · {money(plan.price_cents, plan.currency)}</option>)}</select></label>
+    <label>Perangkat yang tersambung VPN<select name="client_device_type" defaultValue=""><option value="">Belum ditentukan</option>{clientDevices.map(device => <option value={device.value} key={device.value}>{device.label}</option>)}</select><small>Script otomatis hanya tersedia untuk MikroTik; perangkat lain diatur sesuai dukungan SSTP/L2TP.</small></label>
     {!planId && <label>Masa aktif manual (hari)<input name="duration_days" type="number" min={1} max={3650} defaultValue={30} required /><small>Mulai saat akun dibuat. Tidak ada tagihan otomatis.</small></label>}
     <label className={planId ? 'span-2' : ''}>IP statis {selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard' ? '(wajib)' : '(opsional)'}<input name="allocated_ip" required={selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard'} placeholder="10.20.0.10" /></label>
     {selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard' && <label className="span-2">Public key WireGuard client<input name="wireguard_public_key" required pattern="[A-Za-z0-9+/]{43}=" placeholder="Base64 public key 32 byte" /><small>Private key tetap di perangkat client; hanya public key dikirim ke server.</small></label>}
     {selected?.adapter === 'mikrotik-routeros' && chosenProtocol && <label className="span-2">Password VPN<input name="client_password" type="password" required minLength={12} maxLength={255} autoComplete="new-password" /><small>Simpan password ini sebelum membuat akun. Password tidak dapat dilihat lagi setelah provisioning berhasil.</small></label>}
+    {selected?.adapter === 'mikrotik-routeros' && ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'].includes(chosenProtocol) && <>
+      <label className="span-2">Jenis remote (opsional)<select value={remoteType} onChange={event => { const choice = remoteService(event.target.value); setRemoteType(event.target.value); setRemoteTargetPort(choice?.defaultPort ? String(choice.defaultPort) : '') }}><option value="">Tidak perlu remote</option>{remoteServices.map(service => <option value={service.value} key={service.value}>{service.label}</option>)}</select><small>Port publik unik dan script dst-NAT diatur setelah akun aktif.</small></label>
+      {remoteType && <><label>Port tujuan TCP<input name="remote_target_port" type="number" min={1} max={65535} required value={remoteTargetPort} onChange={event => setRemoteTargetPort(event.target.value)} /></label>{remoteType !== 'mikrotik' && <label>IP perangkat di LAN<input name="remote_device_ip" required={remoteService(remoteType)?.needsDeviceIp} placeholder="192.168.88.10" /><small>Wajib untuk OLT di belakang router client.</small></label>}</>}
+    </>}
     {selected?.is_demo && <p className="form-help span-2">Server demo tidak mengubah perangkat VPN sungguhan.</p>}
     {options.isError && <p className="form-error span-2">{apiError(options.error)}</p>}
     {error && <p className="form-error span-2">{error}</p>}

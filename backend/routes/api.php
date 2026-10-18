@@ -40,6 +40,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/accounts/export', [VpnAccountController::class, 'export']);
     Route::get('/servers/{server}/provisioning-options', [VpnAccountController::class, 'provisioningOptions']);
     Route::apiResource('accounts', VpnAccountController::class);
+    Route::put('/accounts/{account}/remote-access', [VpnAccountController::class, 'updateRemoteAccess']);
     Route::post('/accounts/{account}/suspend', [VpnAccountController::class, 'suspend']);
     Route::post('/accounts/{account}/activate', [VpnAccountController::class, 'activate']);
     Route::post('/accounts/{account}/revoke', [VpnAccountController::class, 'revoke']);

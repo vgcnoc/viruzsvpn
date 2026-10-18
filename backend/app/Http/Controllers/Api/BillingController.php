@@ -90,6 +90,10 @@ class BillingController extends Controller
             'protocol' => ['required', Rule::in(self::CUSTOMER_PROTOCOLS)],
             'identifier' => ['required', 'string', 'max:128', 'regex:/^[A-Za-z0-9._-]+$/'],
             'client_password' => ['required', 'string', 'min:12', 'max:255'],
+            'client_device_type' => ['nullable', Rule::in(['mikrotik', 'windows', 'android', 'ios', 'linux', 'cctv', 'other'])],
+            'remote_service' => ['nullable', 'required_with:remote_target_port', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
+            'remote_target_port' => ['nullable', 'required_with:remote_service', 'integer', 'between:1,65535'],
+            'remote_device_ip' => ['nullable', 'required_if:remote_service,olt,olt-https', 'ipv4'],
         ]);
         $payment = BillingSetting::first();
         abort_unless($payment?->bank_name && $payment?->account_name && $payment?->account_number, 409, 'Payment instructions are not configured yet.');
@@ -104,11 +108,17 @@ class BillingController extends Controller
             ->whereNotIn('status', ['revoked', 'expired'])->exists(), 422, 'This VPN username is already in use.');
         abort_if(VpnOrder::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
             ->whereIn('status', ['pending_payment', 'payment_submitted', 'paid'])->exists(), 422, 'This VPN username is already reserved.');
+        abort_if(($data['remote_service'] ?? null) === 'mikrotik' && ! empty($data['remote_device_ip']), 422,
+            'MikroTik Winbox uses the VPN client router itself; do not enter a separate device IP.');
 
         $order = DB::transaction(function () use ($request, $data, $plan, $payment) {
             $order = VpnOrder::create([
                 'user_id' => $request->user()->id, 'plan_id' => $plan->id, 'vpn_server_id' => $data['vpn_server_id'],
                 'type' => 'new', 'status' => 'pending_payment', 'protocol' => $data['protocol'], 'identifier' => $data['identifier'],
+                'remote_target_port' => $data['remote_target_port'] ?? null,
+                'remote_service' => $data['remote_service'] ?? null,
+                'client_device_type' => $data['client_device_type'] ?? null,
+                'remote_device_ip' => $data['remote_device_ip'] ?? null,
                 'encrypted_client_password' => Crypt::encryptString($data['client_password']),
                 'amount_cents' => $plan->price_cents, 'currency' => $plan->currency,
                 'plan_name' => $plan->name, 'duration_days' => $plan->duration_days,
@@ -216,6 +226,10 @@ class BillingController extends Controller
                     'user_id' => $locked->user_id, 'vpn_server_id' => $locked->vpn_server_id,
                     'plan_id' => $locked->plan_id, 'protocol' => $locked->protocol,
                     'identifier' => $locked->identifier, 'status' => 'pending',
+                    'remote_target_port' => $locked->remote_target_port,
+                    'remote_service' => $locked->remote_service,
+                    'client_device_type' => $locked->client_device_type,
+                    'remote_device_ip' => $locked->remote_device_ip,
                     'starts_at' => null, 'expires_at' => null,
                     'device_limit' => $plan->connection_limit, 'bandwidth_mbps' => $plan->bandwidth_mbps,
                     'data_quota_bytes' => $plan->data_quota_bytes,

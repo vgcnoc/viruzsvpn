@@ -33,7 +33,7 @@ class VpnAccountController extends Controller
 
     public function index(Request $request)
     {
-        return VpnAccount::query()->with(['server:id,name,is_demo', 'plan:id,name'])
+        return VpnAccount::query()->with(['server:id,name,hostname,is_demo', 'plan:id,name'])
             ->when($request->string('search')->toString(), fn ($q, $search) => $q->where('identifier', 'like', "%$search%"))
             ->when($request->string('status')->toString(), fn ($q, $status) => $q->where('status', $status))
             ->when($request->integer('server_id'), fn ($q, $server) => $q->where('vpn_server_id', $server))
@@ -52,6 +52,10 @@ class VpnAccountController extends Controller
             'protocol' => ['required', Rule::in(array_keys(ProtocolRegistry::DEFINITIONS))],
             'identifier' => ['required', 'string', 'max:128', 'regex:/^[A-Za-z0-9._-]+$/'],
             'allocated_ip' => ['nullable', 'ip'], 'starts_at' => ['nullable', 'date'], 'expires_at' => ['nullable', 'date', 'after:starts_at'],
+            'client_device_type' => ['nullable', Rule::in(['mikrotik', 'windows', 'android', 'ios', 'linux', 'cctv', 'other'])],
+            'remote_service' => ['nullable', 'required_with:remote_target_port', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
+            'remote_target_port' => ['nullable', 'required_with:remote_service', 'integer', 'between:1,65535'],
+            'remote_device_ip' => ['nullable', 'required_if:remote_service,olt,olt-https', 'ipv4'],
             'device_limit' => ['nullable', 'integer', 'between:1,100'], 'bandwidth_mbps' => ['nullable', 'integer', 'min:1'],
             'data_quota_bytes' => ['nullable', 'integer', 'min:0'],
             'credentials' => ['nullable', 'array'],
@@ -75,6 +79,8 @@ class VpnAccountController extends Controller
         if ($server->adapter === 'mikrotik-routeros' && in_array($data['protocol'], ['ppp', 'l2tp-ipsec', 'sstp', 'pptp', 'openvpn'], true)) {
             abort_unless(! empty($data['credentials']['password']), 422, 'PPP-based RouterOS provisioning requires a client password.');
         }
+        abort_if(($data['remote_service'] ?? null) === 'mikrotik' && ! empty($data['remote_device_ip']), 422,
+            'MikroTik Winbox uses the VPN client router itself; do not enter a separate device IP.');
 
         $startsAt = isset($data['starts_at']) ? Carbon::parse($data['starts_at']) : now();
         $data['uuid'] = (string) Str::uuid();
@@ -120,6 +126,41 @@ class VpnAccountController extends Controller
                 return response()->json(['message' => $result['message'] ?? 'The server IP update failed.', 'result' => $result], 502);
             }
         }
+        $account->update($data);
+
+        return $account->fresh(['server', 'plan']);
+    }
+
+    public function updateRemoteAccess(Request $request, VpnAccount $account)
+    {
+        abort_unless($account->server->adapter === 'mikrotik-routeros', 422, 'Remote access requires a MikroTik server.');
+        abort_unless(in_array($account->protocol, ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'], true), 422, 'Remote access requires a PPP tunnel.');
+        abort_unless($account->status === 'active' && filter_var($account->allocated_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4), 422,
+            'Assign a stable IPv4 tunnel address to this active VPN account first.');
+
+        $data = $request->validate([
+            'remote_public_port' => ['required', 'integer', 'between:20000,59999', Rule::unique('vpn_accounts', 'remote_public_port')
+                ->where('vpn_server_id', $account->vpn_server_id)->ignore($account->id)],
+            'remote_target_port' => ['required', 'integer', 'between:1,65535'],
+            'remote_service' => ['required', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
+            'remote_device_ip' => ['nullable', 'required_if:remote_service,olt,olt-https', 'ipv4'],
+            'remote_allowed_cidr' => ['required', 'string', 'max:18', function ($attribute, $value, $fail) {
+                $parts = explode('/', $value);
+                if (count($parts) !== 2 || ! filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
+                    || ! ctype_digit($parts[1]) || (int) $parts[1] < 24 || (int) $parts[1] > 32) {
+                    $fail('Enter one restricted IPv4 CIDR (/24 to /32), such as 203.0.113.10/32.');
+                }
+            }],
+            'remote_wan_interface' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]+$/'],
+            'remote_gateway_ip' => ['required', 'ipv4'],
+        ]);
+        abort_if($data['remote_gateway_ip'] === $account->allocated_ip, 422, 'The CHR tunnel gateway must differ from the client tunnel IP.');
+        abort_if($data['remote_service'] === 'mikrotik' && ! empty($data['remote_device_ip']), 422,
+            'MikroTik Winbox uses the VPN client router itself; do not enter a separate device IP.');
+        abort_if($data['remote_public_port'] === $account->server->port, 422, 'The public port is already used by the CHR API service.');
+        abort_if(VpnAccount::where('vpn_server_id', $account->vpn_server_id)->where('allocated_ip', $account->allocated_ip)
+            ->whereKeyNot($account->id)->whereNotIn('status', ['revoked', 'expired'])->exists(), 422,
+            'This tunnel IP is also assigned to another active account on the server.');
         $account->update($data);
 
         return $account->fresh(['server', 'plan']);
