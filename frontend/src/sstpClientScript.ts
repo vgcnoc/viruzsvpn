@@ -40,7 +40,7 @@ export function buildUnverifiedSstpClientScript(client: SstpClient): string {
   if (client.password.length < 8) throw new Error('Masukkan password VPN yang digunakan saat akun dibuat.')
 
   const interfaceName = quote(`virvpn-sstp-${client.id}`)
-  const options = `name=${interfaceName} connect-to=${quote(client.host)} port=443 user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=no verify-server-address-from-certificate=no add-default-route=no disabled=no comment=${quote(`virVPN SSTP ${client.identifier}`)}`
+  const options = `name=${interfaceName} connect-to=${quote(client.host)} user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=no add-default-route=no disabled=no comment=${quote(`virVPN SSTP ${client.identifier}`)}`
   // Only create. Never silently downgrade an existing verified interface.
   return `:if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do={ /interface sstp-client add ${options}; :put "virVPN: SSTP client dibuat tanpa verifikasi sertifikat."; } else={ :put "virVPN: interface sudah ada; tidak diubah."; }; /interface sstp-client print detail where name=${interfaceName}`
 }
@@ -56,7 +56,7 @@ export function buildSstpClientScript(client: SstpClient, target: RouterOsTarget
   const interfaceName = quote(`virvpn-sstp-${client.id}`)
   const comment = quote(`virVPN SSTP ${client.identifier}`)
   const caContents = `"${VIRVPN_CA_PEM.replace(/\n/g, '\\n')}"`
-  const clientOptions = `connect-to=${quote(client.host)} port=443 user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=yes verify-server-address-from-certificate=yes add-default-route=no disabled=no comment=${comment}`
+  const clientOptions = `connect-to=${quote(client.host)} user=${quote(client.identifier)} password=${quote(client.password)} authentication=mschap2 verify-server-certificate=yes verify-server-address-from-certificate=yes add-default-route=no disabled=no comment=${comment}`
   // WinBox Terminal may submit every physical newline as a separate command.
   // Keep the complete operation in one command and separate nested statements explicitly.
   const block = (statements: string[]) => `{ ${statements.join('; ')}; }`
