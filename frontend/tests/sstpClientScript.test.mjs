@@ -14,6 +14,8 @@ test('published CA matches the pinned SHA-256 fingerprint', () => {
 
 test('SSTP script verifies the CA and server without changing the default route', () => {
   const script = buildSstpClientScript(client)
+  assert.equal(script.split(/\r?\n/).length, 1, 'RouterOS Terminal must receive one complete command')
+  assert.match(script, /^:if \(true\) do=\{/)
   assert.match(script, /\/file add name="virvpn-ca-2026\.crt" type=file/)
   assert.match(script, /contents="-----BEGIN CERTIFICATE-----\\nMIIC/)
   assert.match(script, /\/certificate import file-name="virvpn-ca-2026\.crt"/)
