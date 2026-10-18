@@ -21,13 +21,19 @@ g8cC9bW5PLZk4Av+lOeEEAxcuFVPg4UGZkqREc2a4XnkWqYhnKF8RCn02cY=
 -----END CERTIFICATE-----`
 
 type SstpClient = { id: number; identifier: string; host: string; password: string }
+export type RouterOsTarget = 'v6' | 'v7-legacy' | 'v7-scoped'
+
+export function usesSharedCertificateTrust(target: RouterOsTarget): boolean {
+  return target === 'v6' || target === 'v7-legacy'
+}
 
 function quote(value: string): string {
   if (/[\x00-\x1f\x7f]/.test(value)) throw new Error('Password tidak boleh berisi karakter kontrol atau baris baru.')
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`
 }
 
-export function buildSstpClientScript(client: SstpClient): string {
+export function buildSstpClientScript(client: SstpClient, target: RouterOsTarget): string {
+  if (!['v6', 'v7-legacy', 'v7-scoped'].includes(target)) throw new Error('Pilih versi RouterOS client.')
   if (!Number.isInteger(client.id) || client.id < 1 || !/^[A-Za-z0-9._-]+$/.test(client.identifier)) {
     throw new Error('Identitas akun VPN tidak valid.')
   }
@@ -44,7 +50,7 @@ export function buildSstpClientScript(client: SstpClient): string {
   const prepareCa = `:if ([:len $caId] = 0) do=${block([
     `:if ([:len [/file find where name="virvpn-ca-2026.crt"]] = 0) do=${block(['/file add name="virvpn-ca-2026.crt" type=file'])}`,
     `/file set [find where name="virvpn-ca-2026.crt"] contents=${caContents}`,
-    '/certificate import file-name="virvpn-ca-2026.crt"',
+    `/certificate import file-name="virvpn-ca-2026.crt"${target === 'v7-scoped' ? ' trusted=no' : ''}`,
     `:set caId [/certificate find where fingerprint="${VIRVPN_CA_SHA256}"]`,
   ])}`
   const configureClient = `:if ([:len [/interface sstp-client find where name=${interfaceName}]] = 0) do=${block([
@@ -58,7 +64,9 @@ export function buildSstpClientScript(client: SstpClient): string {
     `:local caId [/certificate find where fingerprint="${VIRVPN_CA_SHA256}"]`,
     prepareCa,
     `:if ([:len $caId] != 1) do=${block([':error "virVPN: fingerprint CA tidak cocok. SSTP tidak dibuat."'])}`,
-    '/certificate set $caId trusted=yes trust-store=sstp',
+    target === 'v7-scoped'
+      ? '/certificate set $caId trust-store=sstp trusted=yes'
+      : '/certificate set $caId trusted=yes',
     ':put "virVPN [2/3] Membuat atau memperbarui SSTP client..."',
     configureClient,
     ':put "virVPN [3/3] Status interface (R = running):"',

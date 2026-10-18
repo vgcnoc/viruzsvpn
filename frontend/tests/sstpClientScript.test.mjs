@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { buildSstpClientScript, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
+import { buildSstpClientScript, usesSharedCertificateTrust, VIRVPN_CA_PEM, VIRVPN_CA_SHA256 } from '../src/sstpClientScript.ts'
 
 const client = { id: 42, identifier: 'testsaja', host: 'vpn.viruzs.my.id', password: 'safe-password-123' }
 
@@ -13,13 +13,13 @@ test('published CA matches the pinned SHA-256 fingerprint', () => {
 })
 
 test('SSTP script verifies the CA and server without changing the default route', () => {
-  const script = buildSstpClientScript(client)
+  const script = buildSstpClientScript(client, 'v7-scoped')
   assert.equal(script.split(/\r?\n/).length, 1, 'RouterOS Terminal must receive one complete command')
   assert.match(script, /^:if \(true\) do=\{/)
   assert.match(script, /\/file add name="virvpn-ca-2026\.crt" type=file/)
   assert.match(script, /contents="-----BEGIN CERTIFICATE-----\\nMIIC/)
-  assert.match(script, /\/certificate import file-name="virvpn-ca-2026\.crt"/)
-  assert.doesNotMatch(script, /\/certificate import[^;]*trusted=/, 'some RouterOS versions reject trusted= on import')
+  assert.match(script, /\/certificate import file-name="virvpn-ca-2026\.crt" trusted=no/)
+  assert.match(script, /\/certificate set \$caId trust-store=sstp trusted=yes/)
   assert.doesNotMatch(script, /^\s*\/tool fetch/m)
   assert.ok(script.includes(VIRVPN_CA_SHA256))
   assert.match(script, /verify-server-certificate=yes verify-server-address-from-certificate=yes/)
@@ -30,11 +30,25 @@ test('SSTP script verifies the CA and server without changing the default route'
 })
 
 test('SSTP script escapes RouterOS special characters in passwords', () => {
-  const script = buildSstpClientScript({ ...client, password: 'safe"\\$;password' })
+  const script = buildSstpClientScript({ ...client, password: 'safe"\\$;password' }, 'v6')
   assert.ok(script.includes('password="safe\\"\\\\\\$;password"'))
-  assert.throws(() => buildSstpClientScript({ ...client, password: 'bad\npassword' }), /karakter kontrol/)
+  assert.throws(() => buildSstpClientScript({ ...client, password: 'bad\npassword' }, 'v6'), /karakter kontrol/)
 })
 
 test('SSTP script refuses a host that is not covered by the published CA', () => {
-  assert.throws(() => buildSstpClientScript({ ...client, host: 'another.example' }), /Sertifikat CA/)
+  assert.throws(() => buildSstpClientScript({ ...client, host: 'another.example' }, 'v6'), /Sertifikat CA/)
+})
+
+test('RouterOS v6 and pre-7.21 scripts omit unsupported trust-store syntax', () => {
+  for (const target of ['v6', 'v7-legacy']) {
+    const script = buildSstpClientScript(client, target)
+    assert.equal(script.split(/\r?\n/).length, 1)
+    assert.match(script, /\/certificate import file-name="virvpn-ca-2026\.crt";/)
+    assert.match(script, /\/certificate set \$caId trusted=yes/)
+    assert.doesNotMatch(script, /trust-store=|\/certificate import[^;]*trusted=/)
+    assert.match(script, /verify-server-certificate=yes verify-server-address-from-certificate=yes/)
+    assert.equal(usesSharedCertificateTrust(target), true)
+  }
+  assert.equal(usesSharedCertificateTrust('v7-scoped'), false)
+  assert.throws(() => buildSstpClientScript(client, 'other'), /Pilih versi RouterOS/)
 })
