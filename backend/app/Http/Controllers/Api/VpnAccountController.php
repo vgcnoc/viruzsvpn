@@ -85,11 +85,14 @@ class VpnAccountController extends Controller
         if ($server->adapter === 'mikrotik-routeros' && in_array($data['protocol'], ['ppp', 'l2tp-ipsec', 'sstp', 'pptp', 'openvpn'], true)) {
             abort_unless(! empty($data['credentials']['password']), 422, 'PPP-based RouterOS provisioning requires a client password.');
         }
-        if ($server->adapter === 'linux-openvpn') {
+        if (in_array($server->adapter, ['linux-openvpn', 'linux-l2tp'], true)) {
             abort_unless(preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $data['identifier']) && $data['identifier'] !== 'DEFAULT', 422,
-                'OpenVPN usernames must start with a letter or number and cannot be DEFAULT.');
-            abort_unless(! empty($data['credentials']['password']) && strlen($data['credentials']['password']) >= 12, 422, 'Linux OpenVPN requires a client password of at least 12 characters.');
+                'Linux VPN usernames must start with a letter or number and cannot be DEFAULT.');
+            abort_unless(! empty($data['credentials']['password']) && strlen($data['credentials']['password']) >= 12, 422, 'Linux VPN requires a client password of at least 12 characters.');
             abort_if(preg_match('/[\x00-\x1F\x7F]/', $data['credentials']['password']), 422, 'VPN passwords cannot contain control characters.');
+            if ($server->adapter === 'linux-l2tp') {
+                abort_if(preg_match('/\s/', $data['credentials']['password']), 422, 'Linux L2TP/IPsec passwords cannot contain whitespace.');
+            }
             abort_if(! empty($data['remote_target_port']) && empty($data['remote_allowed_cidr']), 422,
                 'Linux remote access requires an allowed source IPv4 address with a /32 prefix.');
         }

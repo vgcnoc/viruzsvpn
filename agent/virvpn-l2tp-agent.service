@@ -1,0 +1,20 @@
+[Unit]
+Description=virVPN L2TP/IPsec account agent
+After=network-online.target xl2tpd.service strongswan-starter.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/virvpn-l2tp/agent.env
+ExecStart=/usr/bin/python3 /opt/virvpn-l2tp/l2tp_agent.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/ppp/chap-secrets /var/lib/virvpn-l2tp
+
+[Install]
+WantedBy=multi-user.target

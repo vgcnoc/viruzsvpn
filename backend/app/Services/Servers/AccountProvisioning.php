@@ -33,6 +33,12 @@ final class AccountProvisioning
             return $ready ? array_values(array_intersect($advertised, ['openvpn'])) : [];
         }
 
+        if ($server->adapter === 'linux-l2tp') {
+            $ready = Cache::remember('virvpn:l2tp-ready:'.$server->id, 30,
+                fn () => (new LinuxL2tpAdapter)->testConnection($server)['status'] === 'online');
+            return $ready ? array_values(array_intersect($advertised, ['l2tp-ipsec'])) : [];
+        }
+
         if ($server->adapter !== 'mikrotik-routeros') {
             return [];
         }

@@ -12,6 +12,7 @@ final class DriverFactory
         return match ($server->adapter) {
             'demo' => new DemoAdapter,
             'linux-agent' => new LinuxAgentAdapter,
+            'linux-l2tp' => new LinuxL2tpAdapter,
             'linux-openvpn' => new LinuxOpenVpnAdapter,
             'mikrotik-routeros' => new MikroTikAdapter,
             default => throw new InvalidArgumentException("Unknown server adapter [{$server->adapter}]."),
