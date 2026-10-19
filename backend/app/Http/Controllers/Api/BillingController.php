@@ -17,20 +17,25 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class BillingController extends Controller
 {
-    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp', 'openvpn'];
+    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp', 'openvpn', 'wireguard'];
 
     public function catalog(AccountProvisioning $provisioning)
     {
         return response()->json([
             'plans' => Plan::where('is_active', true)->orderBy('price_cents')->get(),
             'servers' => VpnServer::query()->where('status', 'online')->where('is_demo', false)
-                ->whereIn('adapter', ['mikrotik-routeros', 'linux-openvpn'])->limit(50)->get(['id', 'name', 'hostname', 'port', 'location', 'adapter', 'status', 'capabilities', 'encrypted_credentials', 'tls_verify'])
+                ->whereIn('adapter', ['mikrotik-routeros', 'linux-openvpn', 'linux-agent'])->limit(50)->get(['id', 'name', 'hostname', 'port', 'location', 'adapter', 'status', 'capabilities', 'encrypted_credentials', 'tls_verify'])
                 ->map(fn ($server) => [
                     'id' => $server->id, 'name' => $server->name, 'location' => $server->location,
-                    'protocols' => array_values(array_intersect($provisioning->availableProtocols($server), $server->adapter === 'linux-openvpn' ? ['openvpn'] : ['l2tp-ipsec', 'sstp'])),
+                    'protocols' => array_values(array_intersect($provisioning->availableProtocols($server), match ($server->adapter) {
+                        'linux-openvpn' => ['openvpn'],
+                        'linux-agent' => ['wireguard'],
+                        default => ['l2tp-ipsec', 'sstp'],
+                    })),
                 ])->filter(fn ($server) => count($server['protocols']) > 0)->values(),
         ]);
     }
@@ -71,7 +76,7 @@ class BillingController extends Controller
     public function myAccounts(Request $request)
     {
         return VpnAccount::where('user_id', $request->user()->id)
-            ->with(['server:id,name,hostname,port,adapter,encrypted_credentials', 'plan:id,name,duration_days'])
+            ->with(['server:id,name,hostname,port,adapter,capabilities,encrypted_credentials', 'plan:id,name,duration_days'])
             ->latest()->paginate(30)->through(function (VpnAccount $account) {
                 if ($account->protocol === 'l2tp-ipsec' && $account->status === 'active' && $account->server?->encrypted_credentials) {
                     $credentials = json_decode(Crypt::decryptString($account->server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR);
@@ -89,7 +94,8 @@ class BillingController extends Controller
             'vpn_server_id' => ['required', 'integer', 'exists:vpn_servers,id'],
             'protocol' => ['required', Rule::in(self::CUSTOMER_PROTOCOLS)],
             'identifier' => ['required', 'string', 'max:128', 'regex:/^[A-Za-z0-9._-]+$/'],
-            'client_password' => ['required', 'string', 'min:12', 'max:255'],
+            'client_password' => ['nullable', 'required_unless:protocol,wireguard', 'string', 'min:12', 'max:255'],
+            'wireguard_public_key' => ['nullable', 'required_if:protocol,wireguard', 'string', 'regex:/^[A-Za-z0-9+\\/]{43}=$/'],
             'client_device_type' => ['nullable', Rule::in(['mikrotik', 'windows', 'android', 'ios', 'linux', 'cctv', 'other'])],
             'remote_service' => ['nullable', 'required_with:remote_target_port', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
             'remote_target_port' => ['nullable', 'required_with:remote_service', 'integer', 'between:1,65535'],
@@ -112,8 +118,9 @@ class BillingController extends Controller
         }
         abort_unless($plan->is_active && in_array($data['protocol'], $plan->allowed_protocols ?? [], true), 422, 'This plan does not include the chosen protocol.');
         abort_unless(! $plan->allowed_server_ids || in_array($server->id, $plan->allowed_server_ids, true), 422, 'This server is not available for the plan.');
-        abort_unless($server->status === 'online' && ! $server->is_demo && in_array($server->adapter, ['mikrotik-routeros', 'linux-openvpn'], true)
+        abort_unless($server->status === 'online' && ! $server->is_demo && in_array($server->adapter, ['mikrotik-routeros', 'linux-openvpn', 'linux-agent'], true)
             && ($data['protocol'] !== 'openvpn' || $server->adapter === 'linux-openvpn')
+            && ($data['protocol'] !== 'wireguard' || $server->adapter === 'linux-agent')
             && in_array($data['protocol'], $server->capabilities['protocols'] ?? [], true)
             && in_array($data['protocol'], $provisioning->availableProtocols($server), true), 422, 'This VPN protocol is not active on the selected server.');
         abort_if(VpnAccount::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])
@@ -132,7 +139,9 @@ class BillingController extends Controller
                 'client_device_type' => $data['client_device_type'] ?? null,
                 'remote_device_ip' => $data['remote_device_ip'] ?? null,
                 'remote_allowed_cidr' => $data['remote_allowed_cidr'] ?? null,
-                'encrypted_client_password' => Crypt::encryptString($data['client_password']),
+            // The field is encrypted at rest and is cleared on approval. For
+            // WireGuard it temporarily carries the non-secret peer public key.
+            'encrypted_client_password' => Crypt::encryptString($data['protocol'] === 'wireguard' ? $data['wireguard_public_key'] : $data['client_password']),
                 'amount_cents' => $plan->price_cents, 'currency' => $plan->currency,
                 'plan_name' => $plan->name, 'duration_days' => $plan->duration_days,
                 'payment_due_at' => now()->addDays(3),
@@ -234,6 +243,17 @@ class BillingController extends Controller
             } else {
                 abort_if(VpnAccount::where('vpn_server_id', $locked->vpn_server_id)->where('protocol', $locked->protocol)->where('identifier', $locked->identifier)->exists(), 409, 'The VPN username is already in use.');
                 $plan = Plan::findOrFail($locked->plan_id);
+                $adapterPayload = null;
+                $provisioningSecret = $locked->encrypted_client_password;
+                $allocatedIp = null;
+                if ($locked->protocol === 'wireguard') {
+                    $peerKey = $locked->encrypted_client_password ? Crypt::decryptString($locked->encrypted_client_password) : '';
+                    abort_unless(preg_match('/^[A-Za-z0-9+\\/]{43}=$/', $peerKey), 422, 'The WireGuard public key for this order is invalid.');
+                    $server = VpnServer::findOrFail($locked->vpn_server_id);
+                    $allocatedIp = $this->nextWireGuardIp($server);
+                    $adapterPayload = ['wireguard_public_key' => $peerKey];
+                    $provisioningSecret = null;
+                }
                 $account = VpnAccount::create([
                     'uuid' => (string) Str::uuid(), 'idempotency_key' => (string) Str::uuid(),
                     'user_id' => $locked->user_id, 'vpn_server_id' => $locked->vpn_server_id,
@@ -244,10 +264,10 @@ class BillingController extends Controller
                     'client_device_type' => $locked->client_device_type,
                     'remote_device_ip' => $locked->remote_device_ip,
                     'remote_allowed_cidr' => $locked->remote_allowed_cidr,
-                    'starts_at' => null, 'expires_at' => null,
+                    'starts_at' => null, 'expires_at' => null, 'allocated_ip' => $allocatedIp,
                     'device_limit' => $plan->connection_limit, 'bandwidth_mbps' => $plan->bandwidth_mbps,
                     'data_quota_bytes' => $plan->data_quota_bytes,
-                    'encrypted_provisioning_secret' => $locked->encrypted_client_password,
+                    'adapter_payload' => $adapterPayload, 'encrypted_provisioning_secret' => $provisioningSecret,
                 ]);
                 Subscription::create([
                     'vpn_account_id' => $account->id, 'plan_id' => $locked->plan_id,
@@ -274,6 +294,25 @@ class BillingController extends Controller
         }
 
         return $order->fresh()->load('account:id,status,expires_at');
+    }
+
+    private function nextWireGuardIp(VpnServer $server): string
+    {
+        $cidr = data_get($server->capabilities, 'wireguard_peer_cidr');
+        if (! is_string($cidr) || ! preg_match('/^((?:[0-9]{1,3}\.){3}[0-9]{1,3})\/(\d{1,2})$/', $cidr, $parts)
+            || (int) $parts[2] !== 24 || ! filter_var($parts[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            throw ValidationException::withMessages(['protocol' => 'This WireGuard server has no valid /24 peer network configured.']);
+        }
+        $network = ip2long($parts[1]);
+        $used = VpnAccount::query()->where('vpn_server_id', $server->id)->whereNotIn('status', ['revoked', 'expired'])
+            ->whereNotNull('allocated_ip')->pluck('allocated_ip')->map(fn ($ip) => ip2long($ip))->filter()->flip();
+        for ($offset = 10; $offset <= 254; $offset++) {
+            $candidate = long2ip($network + $offset);
+            if (! $used->has($network + $offset)) {
+                return $candidate;
+            }
+        }
+        throw ValidationException::withMessages(['protocol' => 'The WireGuard peer address pool is full.']);
     }
 
 }

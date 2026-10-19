@@ -19,7 +19,7 @@ api.interceptors.request.use((config) => {
 
 export type Server = {
   id: number; name: string; adapter: string; hostname: string; port: number; location?: string
-  status: string; vpn_status: string; is_demo: boolean; tls_verify: boolean; capabilities: { protocols?: string[] }; accounts_count?: number
+  status: string; vpn_status: string; is_demo: boolean; tls_verify: boolean; capabilities: { protocols?: string[]; wireguard_peer_cidr?: string; wireguard_public_key?: string }; accounts_count?: number
   last_checked_at?: string; last_latency_ms?: number
 }
 export type ProvisioningOptions = { server_id: number; server_status: string; is_demo: boolean; protocols: string[] }

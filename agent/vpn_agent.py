@@ -29,6 +29,7 @@ CERT = os.getenv("VPN_AGENT_TLS_CERT", "")
 KEY = os.getenv("VPN_AGENT_TLS_KEY", "")
 WG_INTERFACE = os.getenv("VPN_AGENT_WG_INTERFACE", "")
 WG_ALLOWED_CIDR = os.getenv("VPN_AGENT_WG_ALLOWED_CIDR", "")
+WG_SERVER_PUBLIC_KEY = os.getenv("VPN_AGENT_WG_SERVER_PUBLIC_KEY", "")
 PERSIST_WIREGUARD = os.getenv("VPN_AGENT_WG_PERSIST", "0") == "1"
 MAX_SKEW_SECONDS = 60
 MAX_BODY_BYTES = 16_384
@@ -92,6 +93,7 @@ def wireguard_service() -> dict:
             "status": "online", "interface": WG_INTERFACE, "peer_network": WG_ALLOWED_CIDR,
             "peer_count": len([line for line in completed.stdout.splitlines() if line.strip()]),
             "persistence": PERSIST_WIREGUARD,
+            **({"server_public_key": WG_SERVER_PUBLIC_KEY} if WIREGUARD_PUBLIC_KEY.fullmatch(WG_SERVER_PUBLIC_KEY) else {}),
         }
     except (OSError, subprocess.SubprocessError):
         return {"status": "degraded", "interface": WG_INTERFACE, "peer_network": WG_ALLOWED_CIDR}

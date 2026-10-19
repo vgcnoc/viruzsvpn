@@ -1,0 +1,21 @@
+[Unit]
+Description=virVPN WireGuard remote control reverse SSH tunnel
+After=network-online.target vpn-agent.service
+Wants=network-online.target
+Requires=vpn-agent.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/virvpn-wireguard/tunnel.env
+ExecStart=/usr/bin/ssh -N -i ${VV_TUNNEL_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${VV_TUNNEL_KNOWN_HOSTS} -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -R ${VV_TUNNEL_LISTEN}:127.0.0.1:${VV_TUNNEL_AGENT_PORT} ${VV_TUNNEL_USER}@${VV_TUNNEL_HOST}
+Restart=always
+RestartSec=10
+User=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/.ssh /etc/virvpn-wireguard
+
+[Install]
+WantedBy=multi-user.target
