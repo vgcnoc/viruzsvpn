@@ -87,7 +87,12 @@ conn virvpn-l2tp
         if subprocess.run(["/usr/sbin/iptables", "-C", "INPUT", *rule], capture_output=True, text=True).returncode:
             run("/usr/sbin/iptables", "-I", "INPUT", "1", *rule)
     run("/usr/bin/systemctl", "daemon-reload")
-    run("/usr/bin/systemctl", "enable", "--now", "strongswan-starter.service", "virvpn-l2tp-agent.service")
+    run("/usr/bin/systemctl", "enable", "--now", "strongswan-starter.service")
+    # A service start can occur before the new include is parsed. Explicitly
+    # reload it so the conn is installed before the health agent is exposed.
+    run("/usr/sbin/ipsec", "reload")
+    run("/usr/bin/systemctl", "enable", "--now", "virvpn-l2tp-agent.service")
+    run("/usr/bin/systemctl", "restart", "virvpn-l2tp-agent.service")
     for _ in range(10):
         if subprocess.run(["/usr/bin/systemctl", "is-active", "--quiet", "strongswan-starter.service"]).returncode == 0 and subprocess.run(["/usr/bin/systemctl", "is-active", "--quiet", "virvpn-l2tp-agent.service"]).returncode == 0:
             print("virVPN L2TP/IPsec installed: UDP 1701, IPsec UDP 500/4500, agent 127.0.0.1:9447")

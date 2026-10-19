@@ -191,9 +191,15 @@ class L2tpService:
     def health(self) -> dict:
         def active(service: str) -> bool:
             return subprocess.run(["/usr/bin/systemctl", "is-active", "--quiet", service], check=False).returncode == 0
-        l2tp, ipsec = active("xl2tpd.service"), active("strongswan-starter.service") or active("strongswan.service")
-        return {"status": "online" if l2tp and ipsec else "degraded", "version": "virVPN L2TP/IPsec agent 1.0", "metrics": metrics(),
-                "vpn_services": {"l2tp-ipsec": {"status": "online" if l2tp and ipsec else "degraded", "port": 1701, "ipsec": ipsec, "managed_accounts": len(self.state.read()["accounts"]), "endpoint": self.config.public_ip}}}
+        l2tp = active("xl2tpd.service")
+        ipsec = active("strongswan-starter.service") or active("strongswan.service")
+        configured = False
+        if ipsec:
+            status = subprocess.run(["/usr/sbin/ipsec", "status"], check=False, capture_output=True, text=True, timeout=5)
+            configured = status.returncode == 0 and "virvpn-l2tp:" in status.stdout
+        online = l2tp and ipsec and configured
+        return {"status": "online" if online else "degraded", "version": "virVPN L2TP/IPsec agent 1.0", "metrics": metrics(),
+                "vpn_services": {"l2tp-ipsec": {"status": "online" if online else "degraded", "port": 1701, "ipsec": ipsec, "configured": configured, "managed_accounts": len(self.state.read()["accounts"]), "endpoint": self.config.public_ip}}}
 
 
 SERVICE: L2tpService | None = None
