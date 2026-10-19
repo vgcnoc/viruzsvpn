@@ -28,6 +28,14 @@ to **127.0.0.1:9444**, accepts signed/replay-protected fixed operations, and doe
 not expose a shell or accept arbitrary paths/commands. Laravel must be on this
 same VPS. Registration stores the secret encrypted, without displaying it.
 
+For a second VPN VPS, keep the agent loopback-only and create an SSH reverse
+tunnel to an unused loopback port on the application VPS. Restrict the tunnel
+key on the application VPS with `permitlisten` to that one port, set strict host
+key checking, and use `virvpn-openvpn-remote-tunnel.service`. Register it using
+`register_remote_openvpn.php`; it consumes the agent secret on standard input
+instead of writing the secret into an application file. Do not expose TCP 9444
+to the Internet. The customer-facing endpoint remains the remote VPS address.
+
 In **Servers**, the new adapter is **Linux OpenVPN (local agent)**. Manual accounts
 can use a chosen static pool IP or automatic allocation. For customer sales, edit
 a **Paket VPN**, enable `openvpn`, and allow this server. Prices and package

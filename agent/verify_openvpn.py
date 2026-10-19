@@ -14,7 +14,9 @@ from pathlib import Path
 
 
 def verify():
-    secret = next(line.split('=', 1)[1] for line in Path('/etc/virvpn-openvpn/agent.env').read_text().splitlines() if line.startswith('VPN_AGENT_SHARED_SECRET='))
+    environment = dict(line.split('=', 1) for line in Path('/etc/virvpn-openvpn/agent.env').read_text().splitlines() if '=' in line)
+    secret = environment['VPN_AGENT_SHARED_SECRET']
+    cert_name = environment.get('VV_OVPN_CERT_NAME', 'vpn2.viruzs.my.id')
 
     def request(method, path, payload=None):
         body = json.dumps(payload).encode() if payload is not None else b''
@@ -52,7 +54,7 @@ def verify():
             log = (root / 'client.log').open('w+')
             process = subprocess.Popen(['/usr/sbin/openvpn', '--client', '--dev', 'tun-vv-test', '--proto', 'tcp-client',
                 '--remote', '127.0.0.1', '1196', '--ca', '/etc/virvpn-openvpn/ca.crt', '--remote-cert-tls', 'server',
-                '--verify-x509-name', 'vpn2.viruzs.my.id', 'name', '--auth-user-pass', str(auth), '--auth-nocache',
+                '--verify-x509-name', cert_name, 'name', '--auth-user-pass', str(auth), '--auth-nocache',
                 '--cipher', 'AES-256-CBC', '--data-ciphers', 'AES-256-GCM:AES-256-CBC', '--auth', 'SHA1',
                 '--tls-version-min', '1.2', '--ifconfig-noexec', '--route-noexec', '--connect-timeout', '5',
                 '--connect-retry-max', '1', '--verb', '3'], stdout=log, stderr=subprocess.STDOUT)

@@ -1,0 +1,21 @@
+[Unit]
+Description=virVPN reverse control tunnel to the application VPS
+After=network-online.target virvpn-openvpn-agent.service
+Wants=network-online.target
+Requires=virvpn-openvpn-agent.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/virvpn-openvpn/tunnel.env
+ExecStart=/usr/bin/ssh -N -i ${VV_TUNNEL_KEY} -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${VV_TUNNEL_KNOWN_HOSTS} -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o PermitLocalCommand=no -R ${VV_TUNNEL_LISTEN}:127.0.0.1:${VV_TUNNEL_AGENT_PORT} ${VV_TUNNEL_USER}@${VV_TUNNEL_HOST}
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadOnlyPaths=/root/.ssh/virvpn_control_tunnel /root/.ssh/known_hosts
+
+[Install]
+WantedBy=multi-user.target
