@@ -20,6 +20,32 @@ CONFIG = Path('/etc/virvpn-openvpn')
 CODE = Path('/opt/virvpn-openvpn')
 
 
+def certificate_name() -> str:
+    name = os.getenv('VV_OVPN_CERT_NAME', 'vpn2.viruzs.my.id')
+    try:
+        ipaddress.ip_address(name)
+    except ValueError:
+        if not all(part and part.replace('-', '').isalnum() for part in name.split('.')):
+            raise RuntimeError('VV_OVPN_CERT_NAME must be a valid DNS name or IP address.')
+    return name
+
+
+def write_server_extension(name: str) -> Path:
+    subject_alt_name = 'IP:' + name if _is_ip(name) else 'DNS:' + name
+    path = CONFIG / 'server.ext'
+    path.write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName='+subject_alt_name+'\n')
+    os.chmod(path, 0o600)
+    return path
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
 def run(arguments):
     result = subprocess.run(arguments, capture_output=True, text=True, timeout=30)
     if result.returncode:
@@ -35,6 +61,7 @@ def copy(source, destination, mode=0o600):
 def install():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer as root.')
+    name = certificate_name()
     existing = (CONFIG / 'server.conf').exists()
     if not existing:
         for port in [1196, 9444]:
@@ -52,16 +79,16 @@ def install():
     if not (CONFIG / 'agent.env').exists():
         descriptor = os.open(CONFIG / 'agent.env', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, 'w') as handle:
-            handle.write('VPN_AGENT_SHARED_SECRET=' + secrets.token_hex(32) + '\nVPN_AGENT_PORT=9444\n')
+            handle.write('VPN_AGENT_SHARED_SECRET=' + secrets.token_hex(32) + '\nVPN_AGENT_PORT=9444\nVV_OVPN_CERT_NAME=' + name + '\n')
     if not (CONFIG / 'server.crt').exists():
         run(['/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
              '-keyout', str(CONFIG / 'ca.key'), '-out', str(CONFIG / 'ca.crt'), '-subj', '/CN=virVPN Linux OpenVPN CA',
              '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign'])
         run(['/usr/bin/openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(CONFIG / 'server.key'),
-             '-out', str(CONFIG / 'server.csr'), '-subj', '/CN=vpn2.viruzs.my.id'])
+             '-out', str(CONFIG / 'server.csr'), '-subj', '/CN='+name])
         run(['/usr/bin/openssl', 'x509', '-req', '-days', '825', '-in', str(CONFIG / 'server.csr'),
              '-CA', str(CONFIG / 'ca.crt'), '-CAkey', str(CONFIG / 'ca.key'), '-CAcreateserial',
-             '-out', str(CONFIG / 'server.crt'), '-extfile', str(ROOT / 'openvpn-server.ext')])
+             '-out', str(CONFIG / 'server.crt'), '-extfile', str(write_server_extension(name))])
         for name in ['ca.key', 'server.key']:
             os.chmod(CONFIG / name, 0o600)
     copy(ROOT / 'openvpn-server.conf', CONFIG / 'server.conf')
