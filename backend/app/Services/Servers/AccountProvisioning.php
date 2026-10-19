@@ -27,6 +27,12 @@ final class AccountProvisioning
             return array_values(array_intersect($advertised, ['wireguard']));
         }
 
+        if ($server->adapter === 'linux-openvpn') {
+            $ready = Cache::remember('virvpn:openvpn-ready:'.$server->id, 30,
+                fn () => (new LinuxOpenVpnAdapter)->testConnection($server)['status'] === 'online');
+            return $ready ? array_values(array_intersect($advertised, ['openvpn'])) : [];
+        }
+
         if ($server->adapter !== 'mikrotik-routeros') {
             return [];
         }

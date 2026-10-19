@@ -108,7 +108,7 @@ class VpnMonitoringController extends Controller
 
     public function disconnect(Request $request, VpnAccount $account, DriverFactory $drivers)
     {
-        $input = $request->validate(['session_id' => ['required', 'string', 'regex:/^\*[A-Za-z0-9]{1,32}$/']]);
+        $input = $request->validate(['session_id' => ['required', 'string', 'regex:/^(?:\*[A-Za-z0-9]{1,32}|ovpn:[0-9]{1,12})$/']]);
         $result = $drivers->for($account->server)->disconnectSession($account->server, $account, $input['session_id']);
         $success = ($result['supported'] ?? false) && ($result['status'] ?? '') === 'success';
         OperationLog::create([

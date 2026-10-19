@@ -1,0 +1,22 @@
+[Unit]
+Description=virVPN local OpenVPN account agent
+After=network-online.target virvpn-openvpn.service
+Requires=virvpn-openvpn.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/virvpn-openvpn/agent.env
+ExecStart=/usr/bin/python3 /opt/virvpn-openvpn/openvpn_agent.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/virvpn-openvpn /etc/virvpn-openvpn/ccd /run/virvpn-openvpn /run/xtables.lock
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

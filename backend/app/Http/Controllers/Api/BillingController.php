@@ -20,17 +20,17 @@ use Illuminate\Validation\Rule;
 
 class BillingController extends Controller
 {
-    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp'];
+    private const CUSTOMER_PROTOCOLS = ['l2tp-ipsec', 'sstp', 'openvpn'];
 
     public function catalog(AccountProvisioning $provisioning)
     {
         return response()->json([
             'plans' => Plan::where('is_active', true)->orderBy('price_cents')->get(),
             'servers' => VpnServer::query()->where('status', 'online')->where('is_demo', false)
-                ->where('adapter', 'mikrotik-routeros')->limit(50)->get(['id', 'name', 'location', 'adapter', 'status', 'capabilities', 'encrypted_credentials'])
+                ->whereIn('adapter', ['mikrotik-routeros', 'linux-openvpn'])->limit(50)->get(['id', 'name', 'hostname', 'port', 'location', 'adapter', 'status', 'capabilities', 'encrypted_credentials', 'tls_verify'])
                 ->map(fn ($server) => [
                     'id' => $server->id, 'name' => $server->name, 'location' => $server->location,
-                    'protocols' => array_values(array_intersect($provisioning->availableProtocols($server), self::CUSTOMER_PROTOCOLS)),
+                    'protocols' => array_values(array_intersect($provisioning->availableProtocols($server), $server->adapter === 'linux-openvpn' ? ['openvpn'] : ['l2tp-ipsec', 'sstp'])),
                 ])->filter(fn ($server) => count($server['protocols']) > 0)->values(),
         ]);
     }
@@ -71,7 +71,7 @@ class BillingController extends Controller
     public function myAccounts(Request $request)
     {
         return VpnAccount::where('user_id', $request->user()->id)
-            ->with(['server:id,name,hostname,encrypted_credentials', 'plan:id,name,duration_days'])
+            ->with(['server:id,name,hostname,port,adapter,encrypted_credentials', 'plan:id,name,duration_days'])
             ->latest()->paginate(30)->through(function (VpnAccount $account) {
                 if ($account->protocol === 'l2tp-ipsec' && $account->status === 'active' && $account->server?->encrypted_credentials) {
                     $credentials = json_decode(Crypt::decryptString($account->server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR);
@@ -105,9 +105,15 @@ class BillingController extends Controller
         abort_unless($payment?->bank_name && $payment?->account_name && $payment?->account_number, 409, 'Payment instructions are not configured yet.');
         $plan = Plan::findOrFail($data['plan_id']);
         $server = VpnServer::findOrFail($data['vpn_server_id']);
+        if ($server->adapter === 'linux-openvpn') {
+            abort_unless(preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $data['identifier']) && $data['identifier'] !== 'DEFAULT', 422,
+                'OpenVPN usernames must start with a letter or number and cannot be DEFAULT.');
+            abort_if(preg_match('/[\x00-\x1F\x7F]/', $data['client_password']), 422, 'VPN passwords cannot contain control characters.');
+        }
         abort_unless($plan->is_active && in_array($data['protocol'], $plan->allowed_protocols ?? [], true), 422, 'This plan does not include the chosen protocol.');
         abort_unless(! $plan->allowed_server_ids || in_array($server->id, $plan->allowed_server_ids, true), 422, 'This server is not available for the plan.');
-        abort_unless($server->status === 'online' && ! $server->is_demo && $server->adapter === 'mikrotik-routeros'
+        abort_unless($server->status === 'online' && ! $server->is_demo && in_array($server->adapter, ['mikrotik-routeros', 'linux-openvpn'], true)
+            && ($data['protocol'] !== 'openvpn' || $server->adapter === 'linux-openvpn')
             && in_array($data['protocol'], $server->capabilities['protocols'] ?? [], true)
             && in_array($data['protocol'], $provisioning->availableProtocols($server), true), 422, 'This VPN protocol is not active on the selected server.');
         abort_if(VpnAccount::where('vpn_server_id', $server->id)->where('identifier', $data['identifier'])

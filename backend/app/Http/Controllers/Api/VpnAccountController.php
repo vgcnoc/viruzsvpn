@@ -56,6 +56,12 @@ class VpnAccountController extends Controller
             'remote_service' => ['nullable', 'required_with:remote_target_port', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
             'remote_target_port' => ['nullable', 'required_with:remote_service', 'integer', 'between:1,65535'],
             'remote_device_ip' => ['nullable', 'required_if:remote_service,olt,olt-https', 'ipv4'],
+            'remote_allowed_cidr' => ['nullable', 'string', 'max:18', function ($attribute, $value, $fail) {
+                $parts = explode('/', $value);
+                if (count($parts) !== 2 || $parts[1] !== '32' || ! filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $fail('Remote access requires one allowed IPv4 address with a /32 prefix.');
+                }
+            }],
             'device_limit' => ['nullable', 'integer', 'between:1,100'], 'bandwidth_mbps' => ['nullable', 'integer', 'min:1'],
             'data_quota_bytes' => ['nullable', 'integer', 'min:0'],
             'credentials' => ['nullable', 'array'],
@@ -78,6 +84,14 @@ class VpnAccountController extends Controller
         }
         if ($server->adapter === 'mikrotik-routeros' && in_array($data['protocol'], ['ppp', 'l2tp-ipsec', 'sstp', 'pptp', 'openvpn'], true)) {
             abort_unless(! empty($data['credentials']['password']), 422, 'PPP-based RouterOS provisioning requires a client password.');
+        }
+        if ($server->adapter === 'linux-openvpn') {
+            abort_unless(preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $data['identifier']) && $data['identifier'] !== 'DEFAULT', 422,
+                'OpenVPN usernames must start with a letter or number and cannot be DEFAULT.');
+            abort_unless(! empty($data['credentials']['password']) && strlen($data['credentials']['password']) >= 12, 422, 'Linux OpenVPN requires a client password of at least 12 characters.');
+            abort_if(preg_match('/[\x00-\x1F\x7F]/', $data['credentials']['password']), 422, 'VPN passwords cannot contain control characters.');
+            abort_if(! empty($data['remote_target_port']) && empty($data['remote_allowed_cidr']), 422,
+                'Linux remote access requires an allowed source IPv4 address with a /32 prefix.');
         }
         abort_if(($data['remote_service'] ?? null) === 'mikrotik' && ! empty($data['remote_device_ip']), 422,
             'MikroTik Winbox uses the VPN client router itself; do not enter a separate device IP.');
@@ -110,6 +124,23 @@ class VpnAccountController extends Controller
     public function show(VpnAccount $account)
     {
         return $account->load(['server', 'plan', 'user:id,name,email', 'subscriptions.plan', 'operationLogs' => fn ($q) => $q->latest()]);
+    }
+
+    public function clientConfiguration(Request $request, VpnAccount $account)
+    {
+        abort_unless($request->user()->role === 'administrator' || $account->user_id === $request->user()->id, 404);
+        abort_unless($account->status === 'active' && $account->protocol === 'openvpn' && $account->server->adapter === 'linux-openvpn', 422,
+            'A client configuration is available only for an active Linux OpenVPN account.');
+        try {
+            $contents = app(\App\Services\Servers\LinuxOpenVpnAdapter::class)->clientConfiguration($account->server, $account);
+        } catch (\Throwable) {
+            return response()->json(['message' => 'The OpenVPN client configuration is temporarily unavailable.'], 503);
+        }
+        return response($contents)->withHeaders([
+            'Content-Type' => 'application/x-openvpn-profile',
+            'Content-Disposition' => 'attachment; filename="'.preg_replace('/[^A-Za-z0-9._-]/', '', $account->identifier).'.ovpn"',
+            'Cache-Control' => 'no-store',
+        ]);
     }
 
     public function update(Request $request, VpnAccount $account, DriverFactory $drivers)

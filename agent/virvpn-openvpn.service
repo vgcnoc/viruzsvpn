@@ -1,0 +1,23 @@
+[Unit]
+Description=virVPN managed OpenVPN server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/openvpn --config /etc/virvpn-openvpn/server.conf
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=virvpn-openvpn
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/run/virvpn-openvpn
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

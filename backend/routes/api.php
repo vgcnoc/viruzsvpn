@@ -41,6 +41,7 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/accounts/export', [VpnAccountController::class, 'export']);
     Route::get('/servers/{server}/provisioning-options', [VpnAccountController::class, 'provisioningOptions']);
     Route::apiResource('accounts', VpnAccountController::class);
+    Route::get('/accounts/{account}/client-config', [VpnAccountController::class, 'clientConfiguration']);
     Route::put('/accounts/{account}/remote-access', [VpnAccountController::class, 'updateRemoteAccess']);
     Route::post('/accounts/{account}/suspend', [VpnAccountController::class, 'suspend']);
     Route::post('/accounts/{account}/activate', [VpnAccountController::class, 'activate']);
@@ -57,5 +58,6 @@ Route::middleware(['auth:sanctum', 'customer'])->prefix('customer')->group(funct
     Route::post('/orders/{order}/payment', [BillingController::class, 'submitPayment']);
     Route::post('/orders/{order}/cancel', [BillingController::class, 'cancel']);
     Route::get('/accounts', [BillingController::class, 'myAccounts']);
+    Route::get('/accounts/{account}/client-config', [VpnAccountController::class, 'clientConfiguration']);
     Route::post('/accounts/{account}/renew', [BillingController::class, 'renew']);
 });

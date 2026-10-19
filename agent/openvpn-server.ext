@@ -1,0 +1,4 @@
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:vpn2.viruzs.my.id,IP:139.190.96.74

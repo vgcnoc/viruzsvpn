@@ -70,6 +70,13 @@ class ProvisionVpnAccount implements ShouldQueue
             $remote->prepare($account, $blockedPorts, $blockedIps);
             $result = $drivers->for($account->server)->createAccount($account->server, $account);
             if (($result['supported'] ?? false) && in_array($result['status'] ?? '', ['success', 'demo'], true)) {
+                if ($account->server->adapter === 'linux-openvpn') {
+                    $allocation = array_intersect_key($result['data'] ?? [], array_flip([
+                        'allocated_ip', 'remote_public_port', 'remote_target_port', 'remote_allowed_cidr',
+                        'remote_gateway_ip', 'remote_wan_interface', 'remote_rule_status',
+                    ]));
+                    $account->update($allocation);
+                }
                 if ($remote->enabledFor($account)) {
                     $remoteResult = app(MikroTikAdapter::class)->syncRemoteAccess($account->server, $account);
                     if (($remoteResult['status'] ?? '') !== 'success') {

@@ -15,6 +15,7 @@ import { buildRouterOsRemoteScript } from './routerOsRemoteScript'
 import { remoteService, remoteServices } from './remoteServices'
 import { clientDevice, clientDevices } from './clientDevices'
 import VpnMonitoring from './VpnMonitoring'
+import OpenVpnClientConfig from './OpenVpnClientConfig'
 import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './routeros.css'
 import './plans.css'
@@ -168,7 +169,7 @@ function Servers() {
 
 const ipv4Cidr = /^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[12][0-9]|3[0-2])$/
 const routerOsObjectName = /^[A-Za-z0-9._-]{1,64}$/
-const serverSchema = z.object({ name: z.string().min(3), adapter: z.enum(['linux-agent', 'mikrotik-routeros', 'demo']), hostname: z.string().min(1), port: z.coerce.number().int().min(1).max(65535), location: z.string().optional(), protocols: z.string().min(1), username: z.string().optional(), secret: z.string().optional(), routeros_api_ssl: z.boolean(), routeros_allowed_cidr: z.string().optional().refine((value) => !value || ipv4Cidr.test(value), 'Use one IPv4 CIDR, for example 203.0.113.10/32.'), routeros_certificate: z.string().optional().refine((value) => !value || routerOsObjectName.test(value), 'Use a RouterOS certificate name (letters, numbers, dot, dash, underscore).'), routeros_ppp_profile: z.string().min(1).max(64).refine((value) => routerOsObjectName.test(value), 'Use a RouterOS object name.'), routeros_vpn_subnet: z.string().refine((value) => ipv4Cidr.test(value), 'Use an IPv4 subnet, for example 10.250.20.0/24.'), routeros_vpn_gateway: z.string().ip({ version: 'v4' }), routeros_vpn_pool: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}-(?:\d{1,3}\.){3}\d{1,3}$/, 'Use an IP range, for example 10.250.20.10-10.250.20.254.'), routeros_wan_interface: z.string().min(1).max(64).refine((value) => routerOsObjectName.test(value), 'Use a RouterOS interface name.'), routeros_l2tp_secret: z.string().optional(), routeros_remote_auto_enabled: z.boolean(), routeros_remote_ip_pool: z.string().min(1).max(31), tls_verify: z.boolean() })
+const serverSchema = z.object({ name: z.string().min(3), adapter: z.enum(['linux-agent', 'linux-openvpn', 'mikrotik-routeros', 'demo']), hostname: z.string().min(1), port: z.coerce.number().int().min(1).max(65535), location: z.string().optional(), protocols: z.string().min(1), username: z.string().optional(), secret: z.string().optional(), routeros_api_ssl: z.boolean(), routeros_allowed_cidr: z.string().optional().refine((value) => !value || ipv4Cidr.test(value), 'Use one IPv4 CIDR, for example 203.0.113.10/32.'), routeros_certificate: z.string().optional().refine((value) => !value || routerOsObjectName.test(value), 'Use a RouterOS certificate name (letters, numbers, dot, dash, underscore).'), routeros_ppp_profile: z.string().min(1).max(64).refine((value) => routerOsObjectName.test(value), 'Use a RouterOS object name.'), routeros_vpn_subnet: z.string().refine((value) => ipv4Cidr.test(value), 'Use an IPv4 subnet, for example 10.250.20.0/24.'), routeros_vpn_gateway: z.string().ip({ version: 'v4' }), routeros_vpn_pool: z.string().regex(/^(?:\d{1,3}\.){3}\d{1,3}-(?:\d{1,3}\.){3}\d{1,3}$/, 'Use an IP range, for example 10.250.20.10-10.250.20.254.'), routeros_wan_interface: z.string().max(64).refine((value) => !value || routerOsObjectName.test(value), 'Use a RouterOS interface name.'), routeros_l2tp_secret: z.string().optional(), routeros_remote_auto_enabled: z.boolean(), routeros_remote_ip_pool: z.string().min(1).max(31), tls_verify: z.boolean() })
 type ServerValues = z.infer<typeof serverSchema>
 
 const routerOsQuote = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/[\r\n]/g, '')}"`
@@ -333,6 +334,12 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
     if (savedRemote.data.certificate_name) setValue('routeros_certificate', savedRemote.data.certificate_name)
   }, [savedRemote.data, setValue])
   const adapter = watch('adapter')
+  useEffect(() => {
+    if (adapter === 'linux-openvpn') {
+      setValue('protocols', 'openvpn')
+      if (!server || server.adapter !== 'linux-openvpn') setValue('port', 1196)
+    }
+  }, [adapter, server, setValue])
   const routerosApiSsl = watch('routeros_api_ssl')
   const secret = watch('secret')
   const protocols = watch('protocols').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
@@ -344,6 +351,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
     mutationFn: (value: ServerValues) => {
       let credentials: Record<string, unknown> | undefined
       if (value.adapter === 'linux-agent' && value.secret) credentials = { agent_shared_secret: value.secret }
+      if (value.adapter === 'linux-openvpn' && value.secret) credentials = { agent_shared_secret: value.secret, agent_port: 9444 }
       if (value.adapter === 'mikrotik-routeros') {
         credentials = {
           ...(isNewRouterOsServer || value.secret ? {
@@ -391,10 +399,13 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
     },
   })
   const submit = (value: ServerValues) => {
+    if (value.adapter === 'mikrotik-routeros') {
+    if (!value.routeros_wan_interface) { setError('routeros_wan_interface', { message: 'Enter the CHR WAN interface.' }); return }
     if (requiresRouterOsBootstrap && !value.routeros_allowed_cidr) { setError('routeros_allowed_cidr', { message: 'Required to restrict RouterOS API access.' }); return }
     if (requiresRouterOsBootstrap && !value.username?.trim()) { setError('username', { message: 'Enter the RouterOS API username with its password.' }); return }
     if ((requiresRouterOsBootstrap && value.routeros_api_ssl || needsServiceCertificate) && !value.routeros_certificate) { setError('routeros_certificate', { message: 'Required for API-SSL, SSTP, or OpenVPN.' }); return }
     if (needsL2tpSecret && (isNewRouterOsServer || value.routeros_l2tp_secret) && (value.routeros_l2tp_secret?.length ?? 0) < 16) { setError('routeros_l2tp_secret', { message: 'Use a unique IPsec secret with at least 16 characters.' }); return }
+    }
     save.mutate(value)
   }
   const finishBootstrap = () => { setBootstrapScript(null); onSuccess() }
@@ -414,12 +425,13 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
   return <Modal title={server ? 'Edit server' : 'Register server'} close={close}>
     <form className="form-grid" onSubmit={handleSubmit(submit)}>
       <label>Name<input {...register('name')} placeholder="Singapore Edge 01" /></label>
-      <label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux agent (HTTPS)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label>
+      <label>Adapter<select {...register('adapter')}><option value="linux-agent">Linux WireGuard agent (HTTPS)</option><option value="linux-openvpn">Linux OpenVPN (local agent)</option><option value="mikrotik-routeros">MikroTik RouterOS</option><option value="demo">Demo (local only)</option></select></label>
       <label>Hostname / IP<input {...register('hostname')} placeholder="vpn-edge.example.net" /></label>
       <label>Port<input type="number" {...register('port')} />{adapter === 'mikrotik-routeros' && <small>API-SSL normally uses 8729; API uses 8728.</small>}</label>
       <label className="span-2">Location<input {...register('location')} placeholder="Singapore, SG" /></label>
       <label className="span-2">Supported protocols<input {...register('protocols')} placeholder="wireguard,openvpn" /><small>Comma-separated: wireguard, openvpn, l2tp-ipsec, sstp, ppp, pptp.</small></label>
       {adapter === 'linux-agent' && <label className="span-2">Linux agent shared secret<input type="password" {...register('secret')} placeholder={server ? 'Leave blank to keep the stored secret' : 'Minimum 32 characters; stored encrypted'} /></label>}
+      {adapter === 'linux-openvpn' && <><p className="form-help span-2">Hostname dan port adalah endpoint OpenVPN untuk pelanggan. Agent pengelola berjalan di VPS aplikasi pada loopback TCP 9444. Gunakan konfigurasi .ovpn dari detail akun setelah aktif.</p><label className="span-2">OpenVPN agent shared secret<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Kosongkan untuk mempertahankan secret tersimpan' : 'Minimal 32 karakter; harus sama dengan agent'} /></label></>}
       {adapter === 'mikrotik-routeros' && <>
         <label>RouterOS API username<input autoComplete="username" {...register('username')} placeholder={server ? 'Enter again only when changing credentials' : 'virvpn-api'} />{errors.username && <small className="field-error">{errors.username.message}</small>}</label>
         <label>RouterOS API password<input type="password" autoComplete="new-password" {...register('secret')} placeholder={server ? 'Leave blank to keep stored credentials' : 'Stored encrypted; never shown again'} /></label>
@@ -444,7 +456,7 @@ function ServerForm({ close, onSuccess, server }: { close: () => void; onSuccess
           {protocols.includes('pptp') && <p className="script-warning">PPTP is legacy and weak. Select it only for an unavoidable legacy client.</p>}
         </section>
       </>}
-      <label className="check span-2"><input type="checkbox" {...register('tls_verify')} />Verify the endpoint TLS certificate</label>
+      {adapter !== 'linux-openvpn' && <label className="check span-2"><input type="checkbox" {...register('tls_verify')} />Verify the endpoint TLS certificate</label>}
       {Object.keys(errors).length > 0 && <p className="form-error span-2">Check the required fields and network ranges.</p>}
       {savedRemote.isError && <p className="form-error span-2">Pengaturan remote server belum dapat dimuat. Coba buka ulang formulir sebelum menyimpan.</p>}
       {save.isError && <p className="form-error span-2">{apiError(save.error)}</p>}
@@ -480,7 +492,9 @@ function AccountDetails({ accountId, close }: { accountId: number; close: () => 
     <Modal title={account ? `Akun: ${account.identifier}` : 'Detail akun'} close={close}>
       {query.isLoading ? <Skeleton rows={4} /> : account ? <div className="activity-list">
         {account.provisioning_error && <div className="notice error"><Activity size={16} />{account.provisioning_error}</div>}
-        {account.remote_rule_status === 'active' && <div className="notice"><ShieldCheck size={16} />Port remote CHR terpasang otomatis dan dibatasi ke {account.remote_allowed_cidr}.</div>}
+        {account.status === 'active' && account.server?.adapter === 'linux-openvpn' && <div className="account-client-action"><p>Unduh profil OpenVPN, impor ke aplikasi client, lalu gunakan username dan password VPN yang dibuat saat pemesanan.</p><OpenVpnClientConfig account={account} /></div>}
+        {account.remote_rule_status === 'active' && <div className="notice"><ShieldCheck size={16} />Port remote server terpasang otomatis dan dibatasi ke {account.remote_allowed_cidr}.</div>}
+        {account.server?.adapter === 'linux-openvpn' && account.remote_public_port && <p>Alamat remote: <code>{account.server.hostname}:{account.remote_public_port}</code> → {account.allocated_ip}:{account.remote_target_port}. {account.remote_device_ip ? `Tujuan LAN ${account.remote_device_ip} memerlukan penerusan port pada gateway client.` : 'Layanan tujuan harus aktif pada perangkat yang tersambung VPN.'}</p>}
         {['failed', 'cleanup_failed'].includes(account.remote_rule_status ?? '') && <div className="notice error"><Activity size={16} />Aturan remote CHR belum siap atau perlu dibersihkan. Periksa firewall CHR sebelum menggunakan kembali IP atau port ini.</div>}
         <div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)} · perangkat VPN {clientDevice(account.client_device_type)?.label ?? 'belum ditentukan'}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>
         {account.status === 'active' && (!account.client_device_type || account.client_device_type === 'mikrotik') && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST &&
@@ -522,6 +536,7 @@ function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (acco
         client_device_type: form.get('client_device_type') || undefined,
         remote_target_port: remoteType ? Number(remoteTargetPort) : undefined,
         remote_device_ip: remoteType && form.get('remote_device_ip') ? String(form.get('remote_device_ip')).trim() : undefined,
+        remote_allowed_cidr: remoteType && form.get('remote_source_ip') ? `${String(form.get('remote_source_ip')).trim()}/32` : undefined,
         wireguard_public_key: form.get('wireguard_public_key') || undefined,
         credentials: form.get('client_password') ? { password: form.get('client_password') } : undefined,
         expires_at: planId ? undefined : new Date(Date.now() + days * 86_400_000).toISOString(),
@@ -531,20 +546,21 @@ function AccountForm({ close, onSuccess }: { close: () => void; onSuccess: (acco
   })
   return <Modal title="Buat akun VPN manual" close={close}><form className="form-grid" onSubmit={event => { event.preventDefault(); create.mutate(new FormData(event.currentTarget)) }}>
     <p className="form-help span-2">Akun dibuat langsung di server tanpa invoice dan tanpa dikaitkan ke customer. Untuk penjualan otomatis, gunakan alur Paket VPN → Tagihan.</p>
-    <label>Server<select value={serverId} onChange={event => { setServerId(event.target.value); setProtocol(''); setPlanId(''); setError('') }} required><option value="">Pilih server</option>{servers.data?.data.map(server => <option value={server.id} key={server.id}>{server.name}{server.is_demo ? ' (demo)' : ''}{server.status !== 'online' && !server.is_demo ? ` · ${server.status}` : ''}</option>)}</select></label>
+    <label>Server<select value={serverId} onChange={event => { setServerId(event.target.value); setProtocol(''); setPlanId(''); setRemoteType(''); setRemoteTargetPort(''); setError('') }} required><option value="">Pilih server</option>{servers.data?.data.map(server => <option value={server.id} key={server.id}>{server.name}{server.is_demo ? ' (demo)' : ''}{server.status !== 'online' && !server.is_demo ? ` · ${server.status}` : ''}</option>)}</select></label>
     <label>Protokol<select value={chosenProtocol} onChange={event => { setProtocol(event.target.value); setPlanId('') }} required disabled={!available.length || options.isLoading}><option value="">{options.isLoading ? 'Memeriksa layanan...' : 'Tidak tersedia'}</option>{available.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
     {selected && !options.isLoading && !available.length && <p className="form-error span-2">Tidak ada protokol yang siap dibuat pada server ini. Jalankan Test di menu Servers, lalu pastikan layanan VPN aktif. WireGuard MikroTik belum didukung untuk provisioning otomatis.</p>}
     {selected?.adapter === 'mikrotik-routeros' && chosenProtocol === 'pptp' && <p className="form-error span-2">PPTP adalah protokol lama dan tidak direkomendasikan untuk pelanggan baru.</p>}
     <label>Username VPN<input name="identifier" required pattern="[A-Za-z0-9._-]+" maxLength={128} placeholder="client-001" autoComplete="off" /></label>
     <label>Paket (opsional)<select name="plan_id" value={planId} onChange={event => setPlanId(event.target.value)}><option value="">Tanpa paket / manual</option>{eligiblePlans.map(plan => <option value={plan.id} key={plan.id}>{plan.name} · {money(plan.price_cents, plan.currency)}</option>)}</select></label>
-    <label>Perangkat yang tersambung VPN<select name="client_device_type" defaultValue=""><option value="">Belum ditentukan</option>{clientDevices.map(device => <option value={device.value} key={device.value}>{device.label}</option>)}</select><small>Script otomatis hanya tersedia untuk MikroTik; perangkat lain diatur sesuai dukungan SSTP/L2TP.</small></label>
+    <label>Perangkat yang tersambung VPN<select name="client_device_type" defaultValue=""><option value="">Belum ditentukan</option>{clientDevices.map(device => <option value={device.value} key={device.value}>{device.label}</option>)}</select><small>Script otomatis hanya tersedia untuk MikroTik; perangkat lain diatur sesuai dukungan protokol. Untuk OpenVPN, unduh profil .ovpn setelah akun aktif.</small></label>
     {!planId && <label>Masa aktif manual (hari)<input name="duration_days" type="number" min={1} max={3650} defaultValue={30} required /><small>Mulai saat akun dibuat. Tidak ada tagihan otomatis.</small></label>}
-    <label className={planId ? 'span-2' : ''}>IP statis {selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard' ? '(wajib)' : '(opsional)'}<input name="allocated_ip" required={selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard'} placeholder="10.20.0.10" /></label>
+    <label className={planId ? 'span-2' : ''}>IP statis {selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard' ? '(wajib)' : '(opsional)'}<input name="allocated_ip" required={selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard'} placeholder={selected?.adapter === 'linux-openvpn' ? 'Otomatis: 10.77.0.x' : '10.20.0.10'} /></label>
     {selected?.adapter === 'linux-agent' && chosenProtocol === 'wireguard' && <label className="span-2">Public key WireGuard client<input name="wireguard_public_key" required pattern="[A-Za-z0-9+/]{43}=" placeholder="Base64 public key 32 byte" /><small>Private key tetap di perangkat client; hanya public key dikirim ke server.</small></label>}
-    {selected?.adapter === 'mikrotik-routeros' && chosenProtocol && <label className="span-2">Password VPN<input name="client_password" type="password" required minLength={12} maxLength={255} autoComplete="new-password" /><small>Simpan password ini sebelum membuat akun. Password tidak dapat dilihat lagi setelah provisioning berhasil.</small></label>}
-    {selected?.adapter === 'mikrotik-routeros' && ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'].includes(chosenProtocol) && <>
-      <label className="span-2">Jenis remote (opsional)<select value={remoteType} onChange={event => { const choice = remoteService(event.target.value); setRemoteType(event.target.value); setRemoteTargetPort(choice?.defaultPort ? String(choice.defaultPort) : '') }}><option value="">Tidak perlu remote</option>{remoteServices.map(service => <option value={service.value} key={service.value}>{service.label}</option>)}</select><small>Port publik unik dan script dst-NAT diatur setelah akun aktif.</small></label>
+    {['mikrotik-routeros', 'linux-openvpn'].includes(selected?.adapter ?? '') && chosenProtocol && <label className="span-2">Password VPN<input name="client_password" type="password" required minLength={12} maxLength={255} autoComplete="new-password" /><small>Simpan password ini sebelum membuat akun. Password tidak dapat dilihat lagi setelah provisioning berhasil.</small></label>}
+    {['mikrotik-routeros', 'linux-openvpn'].includes(selected?.adapter ?? '') && ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'].includes(chosenProtocol) && <>
+      <label className="span-2">Jenis remote (opsional)<select value={remoteType} onChange={event => { const choice = remoteService(event.target.value); setRemoteType(event.target.value); setRemoteTargetPort(choice?.defaultPort ? String(choice.defaultPort) : '') }}><option value="">Tidak perlu remote</option>{remoteServices.map(service => <option value={service.value} key={service.value}>{service.label}</option>)}</select><small>{selected?.adapter === 'linux-openvpn' ? 'IP statis, port publik unik, dan NAT dibuat otomatis dengan pembatasan IP sumber.' : 'Port publik unik dan script dst-NAT diatur setelah akun aktif.'}</small></label>
       {remoteType && <><label>Port tujuan TCP<input name="remote_target_port" type="number" min={1} max={65535} required value={remoteTargetPort} onChange={event => setRemoteTargetPort(event.target.value)} /></label>{remoteType !== 'mikrotik' && <label>IP perangkat di LAN<input name="remote_device_ip" required={remoteService(remoteType)?.needsDeviceIp} placeholder="192.168.88.10" /><small>Wajib untuk OLT di belakang router client.</small></label>}</>}
+      {remoteType && selected?.adapter === 'linux-openvpn' && <label className="span-2">IP publik yang boleh mengakses remote<input name="remote_source_ip" required placeholder="203.0.113.10" /><small>Satu alamat IPv4; hanya sumber ini yang dapat memakai port remote.</small></label>}
     </>}
     {selected?.is_demo && <p className="form-help span-2">Server demo tidak mengubah perangkat VPN sungguhan.</p>}
     {options.isError && <p className="form-error span-2">{apiError(options.error)}</p>}

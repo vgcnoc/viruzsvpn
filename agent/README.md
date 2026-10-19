@@ -1,4 +1,61 @@
-# VPNOPS Linux WireGuard agent
+# virVPN Linux agents
+
+## Dedicated OpenVPN instance (same VPS as Laravel)
+
+`openvpn_agent.py` manages a separate OpenVPN service, not existing VPN users or
+`chap-secrets`. The supplied deployment is specific to VPS `139.190.96.74`:
+TCP **1196**, `tun-virvpn`, dedicated `10.77.0.0/24`, gateway `10.77.0.1`, and
+static client pool `.10`–`.254`. Existing TCP 1195 and L2TP remain unchanged.
+
+Requirements: Ubuntu/Linux, Python 3.10+, OpenVPN 2.5+, OpenSSL, iproute2,
+iptables, systemd, IPv4 forwarding, WAN `eth0`, and unused ports/subnet above.
+Review configuration, certificate SANs, network conflicts, and firewall policy
+before installing on a different host. This is not a generic remote-agent installer.
+
+From a reviewed checkout on this VPS:
+
+```bash
+sudo python3 agent/install_openvpn.py
+sudo php agent/register_openvpn.php
+sudo python3 agent/verify_openvpn.py
+```
+
+The installer creates its own CA/server private keys on the VPS, a root-only
+HMAC secret, CCD directory, hashed-password state, and two systemd units. A rerun
+preserves CA, keys, secret and accounts but restarts only the new services;
+schedule reruns around active new-instance clients. The agent binds exclusively
+to **127.0.0.1:9444**, accepts signed/replay-protected fixed operations, and does
+not expose a shell or accept arbitrary paths/commands. Laravel must be on this
+same VPS. Registration stores the secret encrypted, without displaying it.
+
+In **Servers**, the new adapter is **Linux OpenVPN (local agent)**. Manual accounts
+can use a chosen static pool IP or automatic allocation. For customer sales, edit
+a **Paket VPN**, enable `openvpn`, and allow this server. Prices and package
+entitlements are never changed by installation. Normal invoice/payment approval
+then queues account creation. Download **OpenVPN (.ovpn)** from active account
+details or the customer service card, import it into an OpenVPN client, and enter
+the username and password chosen at creation. The profile verifies the server
+certificate; it includes only the public CA, never the password/private key.
+MikroTik v6 OpenVPN import compatibility is not provided by this generic profile.
+
+Remote TCP access is optional. It allocates a unique public port in 20000–59999
+and installs tagged DNAT/SNAT/forward rules restricted to the specified `/32`
+source. Retired public ports remain reserved so old database allocations are not
+reused. Existing listeners/DNAT rules are checked for conflicts. Suspend disables
+login, removes the account rules and disconnects its sessions; activate restores
+them; revoke also removes the managed account. Client-side LAN forwarding still
+requires gateway configuration when the target device is behind the VPN client.
+The dedicated chains isolate clients from each other and VPS host services.
+
+Monitoring supports live sessions, disconnect, suspend, activate, and revoke.
+The acceptance check creates a temporary account, establishes a real local TLS
+VPN connection without changing production routes, tests lifecycle/NAT cleanup,
+then removes its own account/rules. Unit tests: `python3 -m unittest -v
+test_openvpn_agent` from `agent/`. Back up root-only state, CCD, CA/keys and the
+application database together. Package bandwidth/data quotas are metadata; this
+adapter does not enforce traffic shaping or byte quotas.
+
+## Linux WireGuard agent
 
 This is a small dependency-free Python 3 HTTPS service for a single, preconfigured WireGuard interface. It authenticates each control-plane request with HMAC, a 60-second timestamp window, and a one-time nonce. It has no shell, SSH, file browser, generic RouterOS endpoint, or arbitrary command capability.
 

@@ -123,13 +123,14 @@ class ServerController extends Controller
     {
         $rules = [
             'name' => [$updating ? 'sometimes' : 'required', 'string', 'max:100'],
-            'adapter' => [$updating ? 'sometimes' : 'required', Rule::in(['demo', 'linux-agent', 'mikrotik-routeros'])],
+            'adapter' => [$updating ? 'sometimes' : 'required', Rule::in(['demo', 'linux-agent', 'linux-openvpn', 'mikrotik-routeros'])],
             'hostname' => [$updating ? 'sometimes' : 'required', 'string', 'max:253'],
             'port' => [$updating ? 'sometimes' : 'required', 'integer', 'between:1,65535'],
             'location' => ['nullable', 'string', 'max:100'], 'description' => ['nullable', 'string', 'max:2000'],
             'tags' => ['nullable', 'array'], 'tls_verify' => ['boolean'], 'is_demo' => ['boolean'],
             'capabilities' => ['nullable', 'array'], 'credentials' => ['nullable', 'array'],
             'credentials.agent_shared_secret' => ['nullable', 'string', 'min:32', 'max:512'],
+            'credentials.agent_port' => ['nullable', 'integer', 'between:1024,65535'],
             'credentials.routeros_username' => ['nullable', 'string', 'max:128'],
             'credentials.routeros_password' => ['nullable', 'string', 'max:512'],
             'credentials.routeros_api_ssl' => ['nullable', 'boolean'],
@@ -173,7 +174,7 @@ class ServerController extends Controller
             }
         }
         $requiresRouterOsBootstrap = $requiresNewCredentials || ($updatesRouterOsCredentials && empty($existingCredentials));
-        if ($requiresNewCredentials && $adapter === 'linux-agent' && empty($data['credentials']['agent_shared_secret'])) {
+        if ($requiresNewCredentials && in_array($adapter, ['linux-agent', 'linux-openvpn'], true) && empty($data['credentials']['agent_shared_secret'])) {
             throw ValidationException::withMessages(['credentials.agent_shared_secret' => 'A Linux agent shared secret is required.']);
         }
         if ($requiresRouterOsBootstrap && $adapter === 'mikrotik-routeros' && (empty($effectiveCredentials['routeros_username']) || empty($effectiveCredentials['routeros_password']))) {
