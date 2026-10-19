@@ -126,7 +126,17 @@ class VpnAccountController extends Controller
 
     public function show(VpnAccount $account)
     {
-        return $account->load(['server', 'plan', 'user:id,name,email', 'subscriptions.plan', 'operationLogs' => fn ($q) => $q->latest()]);
+        $account->load(['server', 'plan', 'user:id,name,email', 'subscriptions.plan', 'operationLogs' => fn ($q) => $q->latest()]);
+        if ($account->protocol === 'l2tp-ipsec' && $account->status === 'active' && $account->server?->encrypted_credentials) {
+            try {
+                $credentials = json_decode(Crypt::decryptString($account->server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR);
+                $account->setAttribute('l2tp_psk', $credentials['l2tp_ipsec_psk'] ?? $credentials['routeros_l2tp_secret'] ?? null);
+            } catch (\Throwable) {
+                // Connection details stay available; a missing PSK only affects this optional field.
+            }
+        }
+
+        return $account;
     }
 
     public function clientConfiguration(Request $request, VpnAccount $account)

@@ -16,6 +16,7 @@ import { remoteService, remoteServices } from './remoteServices'
 import { clientDevice, clientDevices } from './clientDevices'
 import VpnMonitoring from './VpnMonitoring'
 import OpenVpnClientConfig from './OpenVpnClientConfig'
+import ConnectionGuide from './ConnectionGuide'
 import { VIRVPN_SSTP_HOST } from './sstpClientScript'
 import './routeros.css'
 import './plans.css'
@@ -515,6 +516,7 @@ function AccountDetails({ accountId, close }: { accountId: number; close: () => 
         {account.server?.adapter === 'linux-openvpn' && account.remote_public_port && <p>Alamat remote: <code>{account.server.hostname}:{account.remote_public_port}</code> → {account.allocated_ip}:{account.remote_target_port}. {account.remote_device_ip ? `Tujuan LAN ${account.remote_device_ip} memerlukan penerusan port pada gateway client.` : 'Layanan tujuan harus aktif pada perangkat yang tersambung VPN.'}</p>}
         {['failed', 'cleanup_failed'].includes(account.remote_rule_status ?? '') && <div className="notice error"><Activity size={16} />Aturan remote CHR belum siap atau perlu dibersihkan. Periksa firewall CHR sebelum menggunakan kembali IP atau port ini.</div>}
         <div className="activity"><span className="activity-icon"><UsersRound size={15} /></span><div><b>{account.server?.name} · {account.protocol}</b><p>{account.allocated_ip ?? 'Tanpa IP statis'} · berakhir {date(account.expires_at)} · perangkat VPN {clientDevice(account.client_device_type)?.label ?? 'belum ditentukan'}</p></div><span className={statusClass(account.status)}>{account.status}</span></div>
+        {account.status === 'active' && <ConnectionGuide account={account} />}
         {account.status === 'active' && (!account.client_device_type || account.client_device_type === 'mikrotik') && account.protocol === 'sstp' && account.server?.hostname === VIRVPN_SSTP_HOST &&
           <div className="account-client-action"><p>Gunakan akun ini pada router MikroTik client. Password VPN tidak tersimpan setelah aktivasi, jadi masukkan kembali saat membuat script.</p><button className="button primary" type="button" onClick={() => setShowClientScript(true)}><Copy size={15} /> Generate script MikroTik client</button></div>}
         {account.server?.adapter === 'mikrotik-routeros' && ['sstp', 'l2tp-ipsec', 'openvpn', 'pptp', 'ppp'].includes(account.protocol) && (account.status === 'active' || Boolean(account.remote_public_port)) &&
