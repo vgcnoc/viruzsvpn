@@ -22,8 +22,9 @@ AGENT_DIR = ROOT / "etc/vpnops-agent"
 STATE_DIR = ROOT / "var/lib/vpnops-agent"
 SERVICE_DIR = ROOT / "etc/systemd/system"
 FIREWALL_SCRIPT = ROOT / "usr/local/sbin/virvpn-wireguard-firewall"
+PERSIST_SCRIPT = ROOT / "usr/local/sbin/virvpn-wireguard-persist"
 FIREWALL_UNIT = SERVICE_DIR / "virvpn-wireguard-firewall.service"
-WG_SERVICE = "wg-quick@wg-virvpn.service"
+WG_SERVICE = "virvpn-wireguard.service"
 AGENT_SERVICE = "vpn-agent.service"
 
 INTERFACE = "wg-virvpn"
@@ -69,11 +70,53 @@ def install_wireguard() -> None:
     public_key = process.stdout.strip()
     config = WG_DIR / f"{INTERFACE}.conf"
     if not config.exists():
-        write(config, f"[Interface]\nAddress = {ADDRESS}\nListenPort = {PORT}\nPrivateKey = {private_key}\nMTU = 1420\nSaveConfig = false\n")
+        write(config, f"[Interface]\nPrivateKey = {private_key}\nListenPort = {PORT}\n")
+    else:
+        # An earlier wg-quick attempt may have left its helper-only fields in
+        # this file. wg setconf accepts only native WireGuard directives.
+        native = "\n".join(line for line in config.read_text(encoding="utf-8").splitlines()
+                           if not line.strip().lower().startswith(("address", "mtu", "saveconfig"))) + "\n"
+        write(config, native)
     public_file = ROOT / "etc/virvpn-wireguard/server-public.env"
     write(public_file, f"VV_WG_PUBLIC_KEY={public_key}\nVV_WG_ENDPOINT_PORT={PORT}\nVV_WG_NETWORK={NETWORK}\n", 0o644)
     write(ROOT / "etc/sysctl.d/99-virvpn-wireguard.conf", "net.ipv4.ip_forward=1\n", 0o644)
-    run("sysctl", "--system")
+    # Do not load every pre-existing sysctl fragment: an unrelated legacy
+    # fragment may report an error and should not block this isolated service.
+    run("sysctl", "-w", "net.ipv4.ip_forward=1")
+    write(SERVICE_DIR / WG_SERVICE, f'''[Unit]
+Description=virVPN isolated WireGuard interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/virvpn-wireguard-interface up
+ExecStop=/usr/local/sbin/virvpn-wireguard-interface down
+
+[Install]
+WantedBy=multi-user.target
+''', 0o644)
+    write(ROOT / "usr/local/sbin/virvpn-wireguard-interface", f'''#!/bin/sh
+set -eu
+ACTION="${{1:-up}}"
+if [ "$ACTION" = down ]; then
+  ip link del {INTERFACE} 2>/dev/null || true
+  exit 0
+fi
+ip link show {INTERFACE} >/dev/null 2>&1 || ip link add dev {INTERFACE} type wireguard
+/usr/bin/wg setconf {INTERFACE} {config}
+ip address replace {ADDRESS} dev {INTERFACE}
+ip link set up dev {INTERFACE}
+''', 0o700)
+    write(PERSIST_SCRIPT, f'''#!/bin/sh
+set -eu
+[ "$#" -eq 1 ] && [ "$1" = {INTERFACE} ] || exit 64
+temporary={config}.tmp
+/usr/bin/wg showconf {INTERFACE} > "$temporary"
+chmod 600 "$temporary"
+mv "$temporary" {config}
+''', 0o700)
 
 
 def install_firewall() -> None:
@@ -129,12 +172,15 @@ def install_agent() -> None:
         key.chmod(0o600)
         certificate.chmod(0o644)
     environment = AGENT_DIR / "agent.env"
+    public_key = next((line.split("=", 1)[1] for line in (ROOT / "etc/virvpn-wireguard/server-public.env").read_text(encoding="utf-8").splitlines() if line.startswith("VV_WG_PUBLIC_KEY=")), "")
+    if not public_key:
+        raise SystemExit("The WireGuard server public key is unavailable.")
     old = environment.read_text(encoding="utf-8") if environment.exists() else ""
     secret = next((line.split("=", 1)[1] for line in old.splitlines() if line.startswith("VPN_AGENT_SHARED_SECRET=")), secrets.token_urlsafe(48))
     write(environment, "\n".join([
         "VPN_AGENT_BIND=127.0.0.1", "VPN_AGENT_PORT=9443", f"VPN_AGENT_SHARED_SECRET={secret}",
         f"VPN_AGENT_TLS_CERT={certificate}", f"VPN_AGENT_TLS_KEY={key}",
-        f"VPN_AGENT_WG_INTERFACE={INTERFACE}", f"VPN_AGENT_WG_ALLOWED_CIDR={NETWORK}", f"VPN_AGENT_WG_SERVER_PUBLIC_KEY={public_key}", "VPN_AGENT_WG_PERSIST=1", "",
+        f"VPN_AGENT_WG_INTERFACE={INTERFACE}", f"VPN_AGENT_WG_ALLOWED_CIDR={NETWORK}", f"VPN_AGENT_WG_SERVER_PUBLIC_KEY={public_key}", "VPN_AGENT_WG_PERSIST=1", "VPN_AGENT_WG_PERSIST_MODE=virvpn", "",
     ]))
     shutil.copy2(unit_source, SERVICE_DIR / AGENT_SERVICE)
     (SERVICE_DIR / AGENT_SERVICE).chmod(0o644)
@@ -149,6 +195,7 @@ def main() -> None:
     install_firewall()
     install_agent()
     run("systemctl", "daemon-reload")
+    subprocess.run(["systemctl", "disable", "--now", "wg-quick@wg-virvpn.service"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run("systemctl", "enable", "--now", WG_SERVICE, "virvpn-wireguard-firewall.service", AGENT_SERVICE)
     print("virVPN WireGuard installed: endpoint UDP 51820, network 10.66.0.0/24, agent loopback 127.0.0.1:9443")
 

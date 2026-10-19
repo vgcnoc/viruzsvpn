@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\EmailSettingController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\ServerController;
 use App\Http\Controllers\Api\VerifyEmailController;
@@ -28,6 +29,9 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('/customers', [CustomerController::class, 'index']);
     Route::get('/billing/settings', [BillingController::class, 'settings']);
     Route::put('/billing/settings', [BillingController::class, 'updateSettings']);
+    Route::get('/email-settings', [EmailSettingController::class, 'show']);
+    Route::put('/email-settings', [EmailSettingController::class, 'update']);
+    Route::post('/email-settings/test', [EmailSettingController::class, 'test']);
     Route::post('/billing/orders/{order}/confirm', [BillingController::class, 'confirm']);
     Route::post('/billing/orders/{order}/reject', [BillingController::class, 'reject']);
     Route::get('/dashboard', DashboardController::class);

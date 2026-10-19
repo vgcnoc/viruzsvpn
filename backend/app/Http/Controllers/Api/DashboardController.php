@@ -9,10 +9,11 @@ use App\Models\User;
 use App\Models\VpnAccount;
 use App\Models\VpnOrder;
 use App\Models\VpnServer;
+use App\Services\EmailDelivery;
 
 class DashboardController extends Controller
 {
-    public function __invoke()
+    public function __invoke(EmailDelivery $emailDelivery)
     {
         $accounts = VpnAccount::query();
         $billing = BillingSetting::first();
@@ -28,7 +29,7 @@ class DashboardController extends Controller
             ],
             'billing_readiness' => [
                 'payment_method_ready' => (bool) ($billing?->bank_name && $billing?->account_name && $billing?->account_number),
-                'email_delivery_ready' => ! in_array(config('mail.default'), ['log', 'array'], true),
+                'email_delivery_ready' => $emailDelivery->isReady(),
             ],
             'recent_operations' => OperationLog::with(['server:id,name', 'account:id,identifier'])->latest()->limit(8)->get(),
             'demo_data' => VpnServer::where('is_demo', true)->exists(),

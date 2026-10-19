@@ -31,6 +31,7 @@ WG_INTERFACE = os.getenv("VPN_AGENT_WG_INTERFACE", "")
 WG_ALLOWED_CIDR = os.getenv("VPN_AGENT_WG_ALLOWED_CIDR", "")
 WG_SERVER_PUBLIC_KEY = os.getenv("VPN_AGENT_WG_SERVER_PUBLIC_KEY", "")
 PERSIST_WIREGUARD = os.getenv("VPN_AGENT_WG_PERSIST", "0") == "1"
+PERSIST_MODE = os.getenv("VPN_AGENT_WG_PERSIST_MODE", "wg-quick")
 MAX_SKEW_SECONDS = 60
 MAX_BODY_BYTES = 16_384
 SEEN_NONCES: deque[tuple[float, str]] = deque()
@@ -78,7 +79,8 @@ def peer_exists(public_key: str) -> bool:
 def persist_wireguard() -> None:
     if not PERSIST_WIREGUARD:
         return
-    completed = subprocess.run([WG_QUICK, "save", WG_INTERFACE], check=False, capture_output=True, text=True, timeout=15)
+    command = ["/usr/local/sbin/virvpn-wireguard-persist", WG_INTERFACE] if PERSIST_MODE == "virvpn" else [WG_QUICK, "save", WG_INTERFACE]
+    completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=15)
     if completed.returncode != 0:
         raise RuntimeError("WireGuard configuration could not be persisted")
 
@@ -232,7 +234,7 @@ def main() -> None:
             raise ValueError
     except ValueError:
         raise SystemExit("VPN_AGENT_WG_ALLOWED_CIDR must be an IPv4 network")
-    if not os.path.isfile(WG) or (PERSIST_WIREGUARD and not os.path.isfile(WG_QUICK)):
+    if not os.path.isfile(WG) or (PERSIST_WIREGUARD and PERSIST_MODE != "virvpn" and not os.path.isfile(WG_QUICK)):
         raise SystemExit("WireGuard tools are not installed at the expected paths")
     httpd = ThreadingHTTPServer((BIND, PORT), AgentHandler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

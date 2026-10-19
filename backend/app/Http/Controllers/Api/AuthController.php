@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\EmailDelivery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -11,13 +12,19 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function register(Request $request)
+    public function register(Request $request, EmailDelivery $delivery)
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:120'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:12', 'confirmed'],
         ]);
+
+        try {
+            $delivery->configure();
+        } catch (\Throwable) {
+            return response()->json(['message' => 'Registration is temporarily unavailable because email verification has not been configured.'], 503);
+        }
 
         $user = User::create([
             'name' => $data['name'],
@@ -70,12 +77,17 @@ class AuthController extends Controller
         return response()->noContent();
     }
 
-    public function resendVerification(Request $request)
+    public function resendVerification(Request $request, EmailDelivery $delivery)
     {
         $data = $request->validate(['email' => ['required', 'email']]);
         $user = User::where('email', $data['email'])->first();
 
         if ($user?->role === 'customer' && ! $user->hasVerifiedEmail()) {
+            try {
+                $delivery->configure();
+            } catch (\Throwable) {
+                return response()->json(['message' => 'Email verification delivery is not configured.'], 503);
+            }
             $user->sendEmailVerificationNotification();
         }
 
