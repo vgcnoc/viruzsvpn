@@ -6,11 +6,14 @@ use App\Models\OperationLog;
 use App\Models\VpnAccount;
 use App\Models\VpnOrder;
 use App\Services\Servers\DriverFactory;
+use App\Services\Servers\AutomaticRemoteAccess;
+use App\Services\Servers\MikroTikAdapter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 
 class ProvisionVpnAccount implements ShouldQueue
 {
@@ -20,10 +23,18 @@ class ProvisionVpnAccount implements ShouldQueue
 
     public int $backoff = 15;
 
+    public int $timeout = 120;
+
     public function __construct(public int $accountId, public ?int $actorId = null) {}
 
-    public function handle(DriverFactory $drivers): void
+    public function middleware(): array
     {
+        return [(new WithoutOverlapping('vpn-provision:'.$this->accountId))->dontRelease()->expireAfter(180)];
+    }
+
+    public function handle(DriverFactory $drivers, ?AutomaticRemoteAccess $remote = null): void
+    {
+        $remote ??= app(AutomaticRemoteAccess::class);
         $account = VpnAccount::with('server')->findOrFail($this->accountId);
         if (! in_array($account->status, ['pending', 'provisioning'], true)) {
             return;
@@ -37,8 +48,41 @@ class ProvisionVpnAccount implements ShouldQueue
         ]);
 
         try {
+            $blockedPorts = [];
+            $blockedIps = [];
+            if ($remote->enabledFor($account)) {
+                $routerOs = app(MikroTikAdapter::class);
+                $prerequisites = $routerOs->remotePrerequisites($account->server);
+                if (($prerequisites['status'] ?? '') !== 'success') {
+                    throw new \RuntimeException($prerequisites['message'] ?? 'CHR remote prerequisites are not ready.');
+                }
+                $inventory = $routerOs->usedPublicTcpPorts($account->server);
+                if (($inventory['status'] ?? '') !== 'success') {
+                    throw new \RuntimeException($inventory['message'] ?? 'Could not check existing CHR ports.');
+                }
+                $blockedPorts = array_fill_keys($inventory['ports'], true);
+                $addresses = $routerOs->usedTunnelIps($account->server, $account);
+                if (($addresses['status'] ?? '') !== 'success') {
+                    throw new \RuntimeException($addresses['message'] ?? 'Could not check existing CHR addresses.');
+                }
+                $blockedIps = $addresses['addresses'];
+            }
+            $remote->prepare($account, $blockedPorts, $blockedIps);
             $result = $drivers->for($account->server)->createAccount($account->server, $account);
             if (($result['supported'] ?? false) && in_array($result['status'] ?? '', ['success', 'demo'], true)) {
+                if ($remote->enabledFor($account)) {
+                    $remoteResult = app(MikroTikAdapter::class)->syncRemoteAccess($account->server, $account);
+                    if (($remoteResult['status'] ?? '') !== 'success') {
+                        $account->update(['remote_rule_status' => 'failed']);
+                        $rollback = $drivers->for($account->server)->deleteAccount($account->server, $account);
+                        $message = $remoteResult['message'] ?? 'Remote firewall provisioning failed.';
+                        if (($rollback['status'] ?? '') !== 'success') {
+                            $message .= ' PPP rollback also failed; verify the managed account on CHR.';
+                        }
+                        throw new \RuntimeException($message);
+                    }
+                    $account->update(['remote_rule_status' => 'active']);
+                }
                 $order = VpnOrder::where('vpn_account_id', $account->id)->where('type', 'new')->where('status', 'paid')->first();
                 $manualPlan = ! $order && $account->plan_id && $account->subscriptions()->where('status', 'pending_activation')->exists()
                     ? $account->plan : null;

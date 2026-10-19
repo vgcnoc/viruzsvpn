@@ -54,6 +54,7 @@ class CustomerBillingTest extends TestCase
             'protocol' => 'l2tp-ipsec', 'identifier' => 'customer-001',
             'client_password' => 'unique-vpn-password-123', 'client_device_type' => 'mikrotik',
             'remote_service' => 'olt', 'remote_target_port' => 80, 'remote_device_ip' => '192.168.88.10',
+            'remote_allowed_cidr' => '203.0.113.10/32',
         ]);
         $response->assertCreated()->assertJsonPath('status', 'pending_payment')->assertJsonPath('remote_service', 'olt')
             ->assertJsonPath('remote_target_port', 80)->assertJsonPath('remote_device_ip', '192.168.88.10')
@@ -107,6 +108,12 @@ class CustomerBillingTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('remote_target_port');
         $this->postJson('/api/customer/orders', [
             'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
+            'protocol' => 'l2tp-ipsec', 'identifier' => 'client-2', 'client_password' => 'unique-vpn-password-123',
+            'remote_service' => 'mikrotik', 'remote_target_port' => 8291,
+            'remote_allowed_cidr' => '0.0.0.0/0',
+        ])->assertUnprocessable()->assertJsonValidationErrors('remote_allowed_cidr');
+        $this->postJson('/api/customer/orders', [
+            'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
             'protocol' => 'l2tp-ipsec', 'identifier' => 'client-1', 'client_password' => 'unique-vpn-password-123',
             'remote_service' => 'olt', 'remote_target_port' => 80,
         ])->assertUnprocessable()->assertJsonValidationErrors('remote_device_ip');
@@ -114,6 +121,7 @@ class CustomerBillingTest extends TestCase
             'plan_id' => $plan->id, 'vpn_server_id' => $server->id,
             'protocol' => 'l2tp-ipsec', 'identifier' => 'cctv-1', 'client_password' => 'unique-vpn-password-123',
             'client_device_type' => 'cctv', 'remote_service' => 'cctv', 'remote_target_port' => 80,
+            'remote_allowed_cidr' => '203.0.113.10/32',
         ])->assertCreated()->assertJsonPath('client_device_type', 'cctv')->assertJsonPath('remote_service', 'cctv');
         $customer->forceFill(['email_verified_at' => null])->save();
         $this->getJson('/api/customer/catalog')->assertForbidden();

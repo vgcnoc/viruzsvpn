@@ -161,7 +161,20 @@ class VpnAccountController extends Controller
         abort_if(VpnAccount::where('vpn_server_id', $account->vpn_server_id)->where('allocated_ip', $account->allocated_ip)
             ->whereKeyNot($account->id)->whereNotIn('status', ['revoked', 'expired'])->exists(), 422,
             'This tunnel IP is also assigned to another active account on the server.');
+        $original = $account->only(array_keys($data));
         $account->update($data);
+        if ($account->remote_rule_status === 'active') {
+            $driver = app(\App\Services\Servers\MikroTikAdapter::class);
+            $result = $driver->syncRemoteAccess($account->server, $account, false);
+            if (($result['status'] ?? '') !== 'success') {
+                $account->update($original);
+                $restored = $driver->syncRemoteAccess($account->server, $account->fresh(), false);
+                if (($restored['status'] ?? '') !== 'success') {
+                    $account->update(['remote_rule_status' => 'failed']);
+                }
+                return response()->json(['message' => $result['message'] ?? 'CHR remote rule update failed.'], 502);
+            }
+        }
 
         return $account->fresh(['server', 'plan']);
     }
@@ -255,6 +268,10 @@ class VpnAccountController extends Controller
             'suspend' => 'suspended', 'activate' => 'active', default => 'revoked'
         };
         $account->update(['status' => $status]);
+        if ($action === 'revoke' && $account->remote_rule_status && $account->remote_public_port && $account->server->adapter === 'mikrotik-routeros') {
+            $remoteResult = app(\App\Services\Servers\MikroTikAdapter::class)->removeRemoteAccess($account->server, $account);
+            $account->update(['remote_rule_status' => $remoteResult['status'] === 'success' ? 'removed' : 'cleanup_failed']);
+        }
         OperationLog::create(['user_id' => $request->user()->id, 'vpn_server_id' => $account->vpn_server_id, 'vpn_account_id' => $account->id, 'operation' => $action.'_account', 'status' => $result['status'] ?? 'success', 'details' => $result, 'completed_at' => now()]);
 
         return $account->fresh(['server', 'plan']);

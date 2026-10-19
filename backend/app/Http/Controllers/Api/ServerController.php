@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\OperationLog;
 use App\Models\VpnServer;
 use App\Services\Servers\DriverFactory;
+use App\Services\Servers\MikroTikAdapter;
+use App\Services\Servers\Ipv4Range;
 use App\Services\Servers\ProtocolRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -27,7 +29,14 @@ class ServerController extends Controller
     public function store(Request $request)
     {
         $this->authorize('create', VpnServer::class);
-        $server = VpnServer::create($this->validated($request));
+        $data = $this->validated($request);
+        if (isset($data['encrypted_credentials'])) {
+            $credentials = json_decode(Crypt::decryptString($data['encrypted_credentials']), true, 512, JSON_THROW_ON_ERROR);
+            if ($credentials['routeros_remote_auto_enabled'] ?? false) {
+                throw ValidationException::withMessages(['credentials.routeros_remote_auto_enabled' => 'Register the server and paste its setup script before enabling automatic remote access.']);
+            }
+        }
+        $server = VpnServer::create($data);
 
         return response()->json($server, 201);
     }
@@ -42,7 +51,19 @@ class ServerController extends Controller
     public function update(Request $request, VpnServer $server)
     {
         $this->authorize('update', $server);
-        $server->update($this->validated($request, true, $server));
+        $data = $this->validated($request, true, $server);
+        if (isset($data['encrypted_credentials'])) {
+            $next = json_decode(Crypt::decryptString($data['encrypted_credentials']), true, 512, JSON_THROW_ON_ERROR);
+            if ($next['routeros_remote_auto_enabled'] ?? false) {
+                $candidate = clone $server;
+                $candidate->fill($data);
+                $ready = app(MikroTikAdapter::class)->remotePrerequisites($candidate);
+                if (($ready['status'] ?? '') !== 'success') {
+                    throw ValidationException::withMessages(['credentials.routeros_remote_auto_enabled' => $ready['message'] ?? 'The CHR setup is not ready.']);
+                }
+            }
+        }
+        $server->update($data);
 
         return $server->fresh();
     }
@@ -80,6 +101,24 @@ class ServerController extends Controller
         return ['protocols' => ProtocolRegistry::supportedBy($server->capabilities ?? []), 'definitions' => ProtocolRegistry::DEFINITIONS];
     }
 
+    public function remoteSettings(VpnServer $server)
+    {
+        $this->authorize('view', $server);
+        $credentials = $server->encrypted_credentials
+            ? json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR) : [];
+
+        return response()->json([
+            'enabled' => (bool) ($credentials['routeros_remote_auto_enabled'] ?? false),
+            'wan_interface' => $credentials['routeros_wan_interface'] ?? null,
+            'vpn_gateway' => $credentials['routeros_vpn_gateway'] ?? null,
+            'vpn_pool' => $credentials['routeros_vpn_pool'] ?? null,
+            'remote_ip_pool' => $credentials['routeros_remote_ip_pool'] ?? null,
+            'vpn_subnet' => $credentials['routeros_vpn_subnet'] ?? null,
+            'ppp_profile' => $credentials['routeros_ppp_profile'] ?? null,
+            'certificate_name' => $credentials['routeros_certificate'] ?? null,
+        ]);
+    }
+
     private function validated(Request $request, bool $updating = false, ?VpnServer $server = null): array
     {
         $rules = [
@@ -98,6 +137,12 @@ class ServerController extends Controller
             'credentials.routeros_certificate' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
             'credentials.routeros_ppp_profile' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]{1,64}$/'],
             'credentials.routeros_l2tp_secret' => ['nullable', 'string', 'min:16', 'max:255'],
+            'credentials.routeros_remote_auto_enabled' => ['nullable', 'boolean'],
+            'credentials.routeros_wan_interface' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]+$/'],
+            'credentials.routeros_vpn_gateway' => ['nullable', 'ipv4'],
+            'credentials.routeros_vpn_pool' => ['nullable', 'string', 'regex:/^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}-(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/'],
+            'credentials.routeros_remote_ip_pool' => ['nullable', 'string', 'max:31'],
+            'credentials.routeros_vpn_subnet' => ['nullable', 'string', 'max:18'],
         ];
         $data = $request->validate($rules);
         $adapter = $data['adapter'] ?? $server?->adapter;
@@ -107,6 +152,26 @@ class ServerController extends Controller
             ? json_decode(Crypt::decryptString($server->encrypted_credentials), true, 512, JSON_THROW_ON_ERROR)
             : [];
         $effectiveCredentials = array_replace($existingCredentials, $data['credentials'] ?? []);
+        if ($adapter === 'mikrotik-routeros' && ($effectiveCredentials['routeros_remote_auto_enabled'] ?? false)) {
+            foreach (['routeros_wan_interface', 'routeros_vpn_gateway', 'routeros_vpn_pool', 'routeros_remote_ip_pool', 'routeros_vpn_subnet'] as $field) {
+                if (empty($effectiveCredentials[$field])) {
+                    throw ValidationException::withMessages(['credentials.'.$field => 'Required for automatic remote access.']);
+                }
+            }
+            try {
+                [$start, $end] = Ipv4Range::parse($effectiveCredentials['routeros_remote_ip_pool']);
+                $valid = $end - $start <= 65535
+                    && Ipv4Range::withinSubnet($effectiveCredentials['routeros_remote_ip_pool'], $effectiveCredentials['routeros_vpn_subnet'])
+                    && Ipv4Range::withinSubnet($effectiveCredentials['routeros_vpn_pool'], $effectiveCredentials['routeros_vpn_subnet'])
+                    && ! Ipv4Range::overlaps($effectiveCredentials['routeros_remote_ip_pool'], $effectiveCredentials['routeros_vpn_pool'])
+                    && ! Ipv4Range::overlaps($effectiveCredentials['routeros_remote_ip_pool'], $effectiveCredentials['routeros_vpn_gateway']);
+            } catch (\InvalidArgumentException) {
+                $valid = false;
+            }
+            if (! $valid) {
+                throw ValidationException::withMessages(['credentials.routeros_remote_ip_pool' => 'Use a static range inside the VPN subnet, separate from the dynamic pool and gateway.']);
+            }
+        }
         $requiresRouterOsBootstrap = $requiresNewCredentials || ($updatesRouterOsCredentials && empty($existingCredentials));
         if ($requiresNewCredentials && $adapter === 'linux-agent' && empty($data['credentials']['agent_shared_secret'])) {
             throw ValidationException::withMessages(['credentials.agent_shared_secret' => 'A Linux agent shared secret is required.']);

@@ -94,6 +94,12 @@ class BillingController extends Controller
             'remote_service' => ['nullable', 'required_with:remote_target_port', Rule::in(['mikrotik', 'olt', 'olt-https', 'cctv', 'cctv-https', 'ssh', 'https', 'custom'])],
             'remote_target_port' => ['nullable', 'required_with:remote_service', 'integer', 'between:1,65535'],
             'remote_device_ip' => ['nullable', 'required_if:remote_service,olt,olt-https', 'ipv4'],
+            'remote_allowed_cidr' => ['nullable', 'required_with:remote_target_port', 'string', 'max:18', function ($attribute, $value, $fail) {
+                $parts = explode('/', (string) $value);
+                if (count($parts) !== 2 || $parts[1] !== '32' || ! filter_var($parts[0], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $fail('Enter the public IPv4 address allowed to use the remote port as an /32 CIDR.');
+                }
+            }],
         ]);
         $payment = BillingSetting::first();
         abort_unless($payment?->bank_name && $payment?->account_name && $payment?->account_number, 409, 'Payment instructions are not configured yet.');
@@ -119,6 +125,7 @@ class BillingController extends Controller
                 'remote_service' => $data['remote_service'] ?? null,
                 'client_device_type' => $data['client_device_type'] ?? null,
                 'remote_device_ip' => $data['remote_device_ip'] ?? null,
+                'remote_allowed_cidr' => $data['remote_allowed_cidr'] ?? null,
                 'encrypted_client_password' => Crypt::encryptString($data['client_password']),
                 'amount_cents' => $plan->price_cents, 'currency' => $plan->currency,
                 'plan_name' => $plan->name, 'duration_days' => $plan->duration_days,
@@ -230,6 +237,7 @@ class BillingController extends Controller
                     'remote_service' => $locked->remote_service,
                     'client_device_type' => $locked->client_device_type,
                     'remote_device_ip' => $locked->remote_device_ip,
+                    'remote_allowed_cidr' => $locked->remote_allowed_cidr,
                     'starts_at' => null, 'expires_at' => null,
                     'device_limit' => $plan->connection_limit, 'bandwidth_mbps' => $plan->bandwidth_mbps,
                     'data_quota_bytes' => $plan->data_quota_bytes,

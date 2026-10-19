@@ -39,6 +39,10 @@ final class ExpireVpnAccount implements ShouldQueue
                 throw new \RuntimeException($result['message'] ?? 'The server did not revoke the expired account.');
             }
             $account->update(['status' => 'expired']);
+            if ($account->remote_rule_status && $account->remote_public_port && $account->server->adapter === 'mikrotik-routeros') {
+                $remoteResult = app(\App\Services\Servers\MikroTikAdapter::class)->removeRemoteAccess($account->server, $account);
+                $account->update(['remote_rule_status' => $remoteResult['status'] === 'success' ? 'removed' : 'cleanup_failed']);
+            }
             $log->update(['status' => 'success', 'message' => $result['message'] ?? 'Expired account revoked on server.', 'details' => $result, 'completed_at' => now()]);
         } catch (\Throwable $exception) {
             $log->update(['status' => 'failed', 'message' => 'Expiry revocation failed; the job will retry.', 'completed_at' => now()]);
