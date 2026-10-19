@@ -23,13 +23,13 @@ class ProvisionVpnAccount implements ShouldQueue
 
     public int $backoff = 15;
 
-    public int $timeout = 120;
+    public int $timeout = 60;
 
     public function __construct(public int $accountId, public ?int $actorId = null) {}
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping('vpn-provision:'.$this->accountId))->dontRelease()->expireAfter(180)];
+        return [(new WithoutOverlapping('vpn-provision:'.$this->accountId))->releaseAfter(15)->expireAfter(75)];
     }
 
     public function handle(DriverFactory $drivers, ?AutomaticRemoteAccess $remote = null): void
