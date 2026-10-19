@@ -173,6 +173,7 @@ class Firewall:
         while self.run(["-C", self.FWD, *legacy], check=False).returncode == 0:
             self.run(["-D", self.FWD, *legacy])
         self.ensure("filter", self.FWD, ["-o", c.tun, "-d", c.network, "-j", "DROP"])
+        self.ensure("filter", self.FWD, ["-i", c.tun, "-j", "DROP"])
 
     def specs(self, record: dict) -> list[tuple[str, str, list[str]]]:
         if not record.get("remote_public_port"):
