@@ -195,7 +195,7 @@ class L2tpService:
         ipsec = active("strongswan-starter.service") or active("strongswan.service")
         configured = False
         if ipsec:
-            status = subprocess.run(["/usr/sbin/ipsec", "status"], check=False, capture_output=True, text=True, timeout=5)
+            status = subprocess.run(["/usr/sbin/ipsec", "statusall"], check=False, capture_output=True, text=True, timeout=5)
             configured = status.returncode == 0 and "virvpn-l2tp:" in status.stdout
         online = l2tp and ipsec and configured
         return {"status": "online" if online else "degraded", "version": "virVPN L2TP/IPsec agent 1.0", "metrics": metrics(),
