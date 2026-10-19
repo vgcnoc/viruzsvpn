@@ -43,7 +43,9 @@ def main() -> None:
     if not public_ip:
         raise SystemExit("Set VV_L2TP_PUBLIC_IP to the public IPv4 address before running.")
     run("/usr/bin/apt-get", "update", "-qq")
-    run("/usr/bin/apt-get", "install", "-y", "-qq", "strongswan-starter", "strongswan-plugin-openssl", "iptables")
+    # Ubuntu packages the crypto plugins under libstrongswan-standard-plugins;
+    # the older strongswan-plugin-openssl package name is not available here.
+    run("/usr/bin/apt-get", "install", "-y", "-qq", "strongswan-starter", "libstrongswan-standard-plugins", "iptables")
     for directory in (CONFIG, STATE, CODE):
         directory.mkdir(parents=True, exist_ok=True)
         os.chmod(directory, 0o700)
